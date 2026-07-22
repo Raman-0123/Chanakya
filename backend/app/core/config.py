@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     llm_primary_provider: str = "groq"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-opus-4-8"
+    mistral_api_key: str = ""
+    mistral_model: str = "mistral-small-latest"
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
     gemini_api_key: str = ""
@@ -100,6 +102,7 @@ class Settings(BaseSettings):
         """Providers that have a key set, primary first."""
         available = {
             "anthropic": bool(self.anthropic_api_key),
+            "mistral": bool(self.mistral_api_key),
             "groq": bool(self.groq_api_key),
             "gemini": bool(self.gemini_api_key),
             "nvidia": bool(self.nvidia_api_key),

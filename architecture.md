@@ -1,5 +1,7 @@
 # CHANAKYA Architecture
 
+Complete Mermaid diagram source pack: [docs/MERMAID_ARCHITECTURE_PACK.md](docs/MERMAID_ARCHITECTURE_PACK.md).
+
 ## Implemented runtime (July 2026)
 
 ```text
@@ -477,4 +479,3 @@ SIM
 REPORT
 
 -->PDF[Cabinet Brief]
-

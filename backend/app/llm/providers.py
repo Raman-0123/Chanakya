@@ -1,6 +1,6 @@
 """Concrete LLM provider adapters.
 
-Groq, NVIDIA NIM, OpenRouter, and DeepSeek all expose OpenAI-compatible
+Mistral, Groq, NVIDIA NIM, OpenRouter, and DeepSeek all expose OpenAI-compatible
 Chat Completions endpoints, so they share a single adapter parameterised by
 base URL / key / model. Google Gemini has its own SDK and gets a dedicated
 adapter. All are constructed lazily and never raise at import time.
@@ -24,7 +24,7 @@ log = get_logger("llm.providers")
 
 
 # ---------------------------------------------------------------------------
-#  OpenAI-compatible providers (Groq / NVIDIA / OpenRouter / DeepSeek)
+#  OpenAI-compatible providers (Mistral / Groq / NVIDIA / OpenRouter / DeepSeek)
 # ---------------------------------------------------------------------------
 class OpenAICompatibleProvider(BaseLLMProvider):
     def __init__(self, name: str, api_key: str, base_url: str, model: str):
@@ -235,6 +235,7 @@ class AnthropicProvider(BaseLLMProvider):
 #  Registry
 # ---------------------------------------------------------------------------
 _BASE_URLS = {
+    "mistral": "https://api.mistral.ai/v1",
     "groq": "https://api.groq.com/openai/v1",
     "nvidia": "https://integrate.api.nvidia.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",

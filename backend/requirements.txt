@@ -23,7 +23,7 @@ langgraph==0.2.60
 langchain-core==0.3.28
 groq==0.13.1
 google-generativeai==0.8.3
-openai==1.58.1          # used for NVIDIA NIM, OpenRouter, DeepSeek (OpenAI-compatible)
+openai==1.58.1          # used for Mistral, NVIDIA NIM, OpenRouter, DeepSeek (OpenAI-compatible)
 anthropic>=0.40.0       # official Anthropic SDK for Claude models
 
 # ---- Utilities ----

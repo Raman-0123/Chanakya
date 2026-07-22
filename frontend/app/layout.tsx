@@ -28,8 +28,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${plex.variable} ${mono.variable}`}>
-      <body>
+    <html lang="en" className={`${plex.variable} ${mono.variable}`} suppressHydrationWarning>
+      <body suppressHydrationWarning>
         <Providers>
           <CommandShell>{children}</CommandShell>
         </Providers>

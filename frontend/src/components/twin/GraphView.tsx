@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -77,12 +77,24 @@ function getSublabel(type: string, meta: Record<string, unknown> = {}): string {
   }
 }
 
-export function GraphView() {
+export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
   const { data: baseGraph, isLoading: baseLoading } = useGraph();
   const { data: stats } = useOntologyStats();
 
-  const [activeTab, setActiveTab] = useState<"network" | "explore" | "impact">("network");
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"network" | "explore" | "impact">(
+    forceExploreId ? "explore" : "network"
+  );
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(
+    forceExploreId || null
+  );
+  
+  useEffect(() => {
+    if (forceExploreId) {
+      setSelectedEntityId(forceExploreId);
+      setActiveTab("explore");
+    }
+  }, [forceExploreId]);
+
   const [selectedEventId, setSelectedEventId] = useState<string>("hormuz_closure");
   const [searchQuery, setSearchQuery] = useState("");
   const [showEdgeLabels, setShowEdgeLabels] = useState(true);

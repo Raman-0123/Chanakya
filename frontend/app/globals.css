@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    @apply bg-void text-ink antialiased;
+    height: 100%;
+  }
+  body {
+    background-image: radial-gradient(
+        circle at 50% -10%,
+        rgba(34, 211, 238, 0.06),
+        transparent 55%
+      ),
+      radial-gradient(circle at 90% 10%, rgba(245, 158, 11, 0.04), transparent 45%);
+    background-attachment: fixed;
+  }
+  ::selection {
+    @apply bg-signal/30 text-white;
+  }
+  /* thin operational scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-line-strong rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-signal-dim;
+  }
+}
+
+@layer components {
+  /* Data label — micro uppercase mono, used for terminal-style captions */
+  .label-terminal {
+    @apply font-mono text-micro uppercase tracking-[0.14em] text-ink-dim;
+  }
+  /* Panel surface */
+  .surface {
+    @apply rounded-lg border border-line bg-panel/80 shadow-panel backdrop-blur-sm;
+  }
+  .surface-raised {
+    @apply rounded-lg border border-line-strong bg-panel-raised shadow-panel;
+  }
+  /* Faint blueprint grid backdrop for map / twin areas */
+  .blueprint {
+    background-size: 32px 32px;
+    @apply bg-grid-faint;
+  }
+  /* Numeric readout */
+  .readout {
+    @apply font-mono tabular-nums tracking-tight;
+  }
+}

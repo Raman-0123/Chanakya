@@ -1,0 +1,7 @@
+.next
+node_modules
+.turbo
+.DS_Store
+coverage
+npm-debug.log
+pnpm-debug.log

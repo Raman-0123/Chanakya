@@ -1,0 +1,38 @@
+[
+  {
+    "id": "ppac-import-dependence",
+    "title": "India petroleum imports and consumption",
+    "publisher": "Petroleum Planning & Analysis Cell, Government of India",
+    "url": "https://ppac.gov.in/import-export",
+    "section": "Import dependence",
+    "retrieved_at": "2026-07-22",
+    "text": "India relies on imported crude for most refinery feedstock. Supply analysis should distinguish crude import dependence from petroleum product trade and should report the statistical period used."
+  },
+  {
+    "id": "isprl-reserves",
+    "title": "Indian Strategic Petroleum Reserve facilities",
+    "publisher": "Indian Strategic Petroleum Reserves Limited",
+    "url": "https://www.isprlindia.com/",
+    "section": "Storage facilities",
+    "retrieved_at": "2026-07-22",
+    "text": "India's first-phase strategic petroleum storage is distributed across Visakhapatnam, Mangaluru and Padur. Drawdown analysis must respect finite site inventory and delivery-rate constraints."
+  },
+  {
+    "id": "eia-hormuz",
+    "title": "Strait of Hormuz oil transit chokepoint",
+    "publisher": "U.S. Energy Information Administration",
+    "url": "https://www.eia.gov/international/content/analysis/special_topics/World_Oil_Transit_Chokepoints/",
+    "section": "Strait of Hormuz",
+    "retrieved_at": "2026-07-22",
+    "text": "The Strait of Hormuz is a critical global oil transit chokepoint. A closure disrupts Gulf export access and cannot be treated as a simple maritime detour for cargo loaded inside the Gulf."
+  },
+  {
+    "id": "eia-red-sea",
+    "title": "Bab el-Mandeb and Suez transit",
+    "publisher": "U.S. Energy Information Administration",
+    "url": "https://www.eia.gov/international/content/analysis/special_topics/World_Oil_Transit_Chokepoints/",
+    "section": "Bab el-Mandeb and Suez Canal",
+    "retrieved_at": "2026-07-22",
+    "text": "When Red Sea transit is unsafe, suitable cargo can route around the Cape of Good Hope, increasing voyage distance, delivery time, vessel demand and freight cost rather than necessarily removing the cargo permanently."
+  }
+]

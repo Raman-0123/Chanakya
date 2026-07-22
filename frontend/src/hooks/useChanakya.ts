@@ -1,0 +1,148 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { ApiError, apiGet, apiPost } from "@/lib/api";
+import type {
+  CouncilResult,
+  GraphData,
+  IntelFeed,
+  MissionRecord,
+  NetworkData,
+  ScenarioSpec,
+  SimulationResult,
+  ResponseLevers,
+  SourceStatus,
+  OntologyExploreResult,
+  OntologyImpactResult,
+  OntologySearchResult,
+  OntologyStats,
+} from "@/lib/types";
+
+/** Live fused intelligence feed (events + prices + weather + vessels). */
+export function useIntelFeed() {
+  return useQuery<IntelFeed>({
+    queryKey: ["intel-feed"],
+    queryFn: () => apiGet<IntelFeed>("/api/intelligence/feed"),
+    refetchInterval: 30_000,
+  });
+}
+
+/** The digital-twin network (static baseline). */
+export function useNetwork() {
+  return useQuery<NetworkData>({
+    queryKey: ["network"],
+    queryFn: () => apiGet<NetworkData>("/api/network"),
+    staleTime: Infinity,
+  });
+}
+
+/** Scenario catalog. */
+export function useScenarios() {
+  return useQuery<ScenarioSpec[]>({
+    queryKey: ["scenarios"],
+    queryFn: () => apiGet<ScenarioSpec[]>("/api/simulation/scenarios"),
+    staleTime: Infinity,
+  });
+}
+
+/** Run the deterministic simulation for a scenario + levers (instant). */
+export function useSimulation(scenarioId: string, levers: ResponseLevers) {
+  return useQuery<SimulationResult>({
+    queryKey: ["simulation", scenarioId, levers],
+    queryFn: () =>
+      apiPost<SimulationResult>("/api/simulation/run", {
+        scenario_id: scenarioId,
+        levers,
+      }),
+    staleTime: 5_000,
+  });
+}
+
+/** Knowledge graph (entity relationships + live event links). */
+export function useGraph() {
+  return useQuery<GraphData>({
+    queryKey: ["graph"],
+    queryFn: () => apiGet<GraphData>("/api/graph"),
+    refetchInterval: 120_000,
+  });
+}
+
+/** Explore N-hop neighborhood of a given ontology entity. */
+export function useOntologyExplore(entityId: string | null, depth: number = 2) {
+  return useQuery<OntologyExploreResult>({
+    queryKey: ["ontology-explore", entityId, depth],
+    queryFn: () => apiGet<OntologyExploreResult>(`/api/ontology/explore/${encodeURIComponent(entityId!)}?depth=${depth}`),
+    enabled: Boolean(entityId),
+    staleTime: 30_000,
+  });
+}
+
+/** Trace impact propagation from a specific disruption event. */
+export function useOntologyImpact(eventId: string | null) {
+  return useQuery<OntologyImpactResult>({
+    queryKey: ["ontology-impact", eventId],
+    queryFn: () => apiGet<OntologyImpactResult>(`/api/ontology/impact/${encodeURIComponent(eventId!)}`),
+    enabled: Boolean(eventId),
+    staleTime: 30_000,
+  });
+}
+
+/** Search ontology entities by keyword. */
+export function useOntologySearch(query: string) {
+  return useQuery<OntologySearchResult>({
+    queryKey: ["ontology-search", query],
+    queryFn: () => apiGet<OntologySearchResult>(`/api/ontology/search?q=${encodeURIComponent(query)}`),
+    enabled: query.trim().length > 0,
+    staleTime: 10_000,
+  });
+}
+
+/** Get schema statistics for the ontology. */
+export function useOntologyStats() {
+  return useQuery<OntologyStats>({
+    queryKey: ["ontology-stats"],
+    queryFn: () => apiGet<OntologyStats>("/api/ontology/stats"),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useSourceStatus() {
+  return useQuery<{ schema_version: string; sources: SourceStatus[] }>({
+    queryKey: ["source-status"],
+    queryFn: () => apiGet("/api/sources/status"),
+    refetchInterval: 60_000,
+  });
+}
+
+/** Convene the six-agent council + decision engine. */
+export function useCouncil(scenarioId: string, levers: ResponseLevers) {
+  return useQuery<CouncilResult>({
+    queryKey: ["council", scenarioId, levers],
+    queryFn: () =>
+      apiPost<CouncilResult>("/api/council/convene", {
+        scenario_id: scenarioId,
+        levers,
+      }),
+    staleTime: 10_000,
+  });
+}
+
+/** Most recent persistent mission for the current scenario. */
+export function useLatestMission(scenarioId: string) {
+  return useQuery<MissionRecord | null>({
+    queryKey: ["mission-latest", scenarioId],
+    queryFn: async () => {
+      try {
+        return await apiGet<MissionRecord>(`/api/missions/latest?scenario_id=${scenarioId}`);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          return null;
+        }
+        throw error;
+      }
+    },
+    staleTime: 10_000,
+    retry: false,
+  });
+}
+

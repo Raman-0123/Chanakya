@@ -1,0 +1,34 @@
+# ---- Web framework ----
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+eval-type-backport==0.2.2
+python-dotenv==1.0.1
+
+# ---- HTTP / data ingestion ----
+httpx==0.28.1
+websockets==14.1
+feedparser==6.0.11
+
+# ---- Datastores ----
+asyncpg==0.30.0
+sqlalchemy[asyncio]==2.0.36
+redis==5.2.1
+neo4j==5.27.0
+qdrant-client==1.12.1
+
+# ---- AI / multi-agent orchestration ----
+langgraph==0.2.60
+langchain-core==0.3.28
+groq==0.13.1
+google-generativeai==0.8.3
+openai==1.58.1          # used for NVIDIA NIM, OpenRouter, DeepSeek (OpenAI-compatible)
+
+# ---- Utilities ----
+tenacity==9.0.0
+structlog==24.4.0
+
+# ---- Verification ----
+pytest==8.3.4
+pytest-asyncio==0.25.0

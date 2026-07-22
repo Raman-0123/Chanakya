@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { MapContainer, TileLayer, Polyline, CircleMarker, Tooltip } from "react-leaflet";
 import type { IntelEvent, NetworkData, Vessel } from "@/lib/types";
 import { SEVERITY_META } from "@/lib/severity";
+import { cn } from "@/lib/utils";
 
 export interface TwinSelection {
   kind: "refinery" | "port" | "supplier" | "reserve" | "corridor";
@@ -31,12 +32,16 @@ export default function EnergyMap({
   vessels,
   events,
   mapMode,
+  scenarioId,
+  activated,
   onSelect,
 }: {
   network: NetworkData;
   vessels: Vessel[];
   events: IntelEvent[];
   mapMode: MapMode;
+  scenarioId?: string;
+  activated?: boolean;
   onSelect: (sel: TwinSelection) => void;
 }) {
   const mappableEvents = events.filter((event) => event.lat !== null && event.lon !== null);
@@ -47,7 +52,7 @@ export default function EnergyMap({
       zoom={4}
       minZoom={3}
       maxZoom={7}
-      className="h-full w-full bg-void"
+      className={cn("h-full w-full bg-void", mapMode === "operations" && "map-tactical-filter")}
       worldCopyJump
       attributionControl={false}
     >
@@ -192,6 +197,53 @@ export default function EnergyMap({
           </CircleMarker>
         );
       })}
+
+      {/* Simulated Scenario Overlays */}
+      {scenarioId === "hormuz_closure" && (
+        <>
+          {/* Conflict Zone / Blockade Area */}
+          <CircleMarker
+            center={[26.5, 56.2]}
+            radius={45}
+            pathOptions={{
+              color: "#ef4444",
+              fillColor: "#ef4444",
+              fillOpacity: 0.15,
+              weight: 2,
+              dashArray: "4 6",
+              className: "animate-pulse"
+            }}
+          >
+            <Tooltip sticky>HORMUZ CHOKEPOINT — HIGH RISK CONFLICT ZONE</Tooltip>
+          </CircleMarker>
+
+          {/* Military Equipment (Only shown when executing) */}
+          {activated && (
+            <>
+              {/* Carrier Strike Group */}
+              <CircleMarker
+                center={[22.5, 62.0]}
+                radius={8}
+                pathOptions={{
+                  color: "#00f0ff",
+                  fillColor: "#00f0ff",
+                  fillOpacity: 0.4,
+                  weight: 2,
+                }}
+              >
+                <Tooltip sticky>TASK FORCE 74 — CARRIER STRIKE GROUP</Tooltip>
+              </CircleMarker>
+              <Polyline
+                positions={[[22.5, 62.0], [25.0, 58.0]]}
+                pathOptions={{ color: "#00f0ff", weight: 2, dashArray: "5 5", opacity: 0.7 }}
+              >
+                <Tooltip sticky>Projected Intercept Vector</Tooltip>
+              </Polyline>
+            </>
+          )}
+        </>
+      )}
+
     </MapContainer>
   );
 }

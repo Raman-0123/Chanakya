@@ -112,6 +112,8 @@ export function UnifiedMissionControl() {
             vessels={intelFeed?.vessels ?? []}
             events={intelFeed?.events ?? []}
             mapMode={mapMode}
+            scenarioId={scenarioId}
+            activated={activated}
             onSelect={(item) => {
               setSelectedTwinItem(item);
               setRightDrawer("ontology");
@@ -119,8 +121,8 @@ export function UnifiedMissionControl() {
           />
         )}
         
-        {/* Map Context Overlay (Top Left inside map) */}
-        <div className="absolute top-16 left-[72px] z-10 flex flex-col gap-2 pointer-events-auto">
+        {/* Map Context Overlay (Top Center inside map) */}
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 flex gap-4 pointer-events-auto items-start">
           <div className="tactical-panel flex items-center gap-2 p-1.5 bg-[#080d1a]/95">
             <button
               onClick={() => setMapMode("satellite")}

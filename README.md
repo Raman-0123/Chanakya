@@ -19,12 +19,17 @@ The operating loop is:
 - Redis Streams ingestion bus with deduplication, consumer acknowledgements,
   bounded retries, dead-letter stream and a distributed scheduler lease.
 - PostgreSQL event, workflow, mission and execution audit records.
-- Neo4j ontology for suppliers, corridors, ports, refineries, reserves and
+- Neo4j ontology for suppliers, corridors, ports, refineries, reserves, downstream demand hubs and
   risk events. The graph API declares when it is using its degraded in-memory fallback.
-- LangGraph council with six parallel specialists, deterministic grounded mode,
-  optional multi-provider LLM explanation, Qdrant evidence retrieval and persisted runs.
-- Daily disruption horizon with inventory buffers, procurement lead time,
-  finite SPR volume/draw constraints and actionable replacement cargo options.
+- One provenance-carrying operational snapshot shared by risk scoring, geo stations,
+  simulation, all six council agents and the optimizer; simulated fallback cannot auto-trigger action.
+- LangGraph council with six parallel specialists, typed control proposals,
+  optional multi-provider LLM reasoning/model provenance, Qdrant evidence retrieval and persisted runs.
+- Constraint search across response levers, with route-specific cargo ETA, current
+  tanker/port/market conditions, refinery-grade fit and late-arrival rejection.
+- Daily disruption horizon with refinery run-rate projections, power/fuel stress,
+  finite site-level SPR schedules and replacement-linked replenishment windows.
+- Event-triggered council runs with risk/quality thresholds, cooldown and mission deduplication.
 - WebSocket-first UI updates with reconnect, heartbeat, cursor deduplication and
   REST polling recovery.
 
@@ -80,7 +85,9 @@ The backend remains usable when optional stores are down. In production,
 - `GET /api/sources/status`
 - `GET /api/workflows/{run_id}`
 - `GET /api/missions/{id}`
-- `POST /api/missions/{id}/activate` with `X-Operator-Pin`
+- `GET /api/operations/snapshot` and `GET /api/operations/scenario`
+- `POST /api/missions/{id}/activate` with selected `strategy_id` and `X-Operator-Pin`
+- `POST /api/missions/{id}/tasks/{task_id}` for audited execution status
 - `POST /api/sources/refresh` with `X-Operator-Pin`
 - `WS /api/ws/intelligence`
 - `GET /api/livez` and `GET /api/readyz`
@@ -94,9 +101,10 @@ cd backend && .venv/bin/pytest -q
 cd frontend && pnpm typecheck && pnpm build
 ```
 
-CI runs those checks on every push and pull request. The 15-test backend suite
-covers provenance/deduplication, finite SPR accounting, overlapping shocks,
-procurement feasibility, LangGraph workflow creation and protected contracts.
+CI runs those checks on every push and pull request. The backend suite covers
+provenance gating, AIS typing/geofencing, finite and site-level SPR accounting,
+route-specific arrivals, agent-to-optimizer influence, downstream cascades,
+LangGraph workflow creation and protected mission/task contracts.
 
 ## Deployment
 
@@ -106,5 +114,5 @@ Neo4j AuraDB and Qdrant Cloud. See [DEPLOYMENT.md](DEPLOYMENT.md) for exact
 variables, commands, health checks and post-deploy acceptance tests.
 
 Product specifications:
-[PROBLEM.MD](PROBLEM.MD) · [architecture.md](architecture.md) ·
-[masterimplementation.md](masterimplementation.md) · [MEMORY.md](MEMORY.md)
+[PROBLEM.MD](docs/PROBLEM.MD) · [architecture.md](docs/architecture.md) ·
+[masterimplementation.md](docs/masterimplementation.md) · [MEMORY.md](docs/MEMORY.md)

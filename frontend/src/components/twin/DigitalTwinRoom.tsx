@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
 import { X, Map as MapIcon, Share2, Satellite, Zap, Layers, Check } from "lucide-react";
-import { useNetwork, useIntelFeed, useSourceStatus, useSatelliteLayers } from "@/hooks/useChanakya";
+import { useNetwork, useIntelFeed, useSourceStatus, useSatelliteLayers, useOperationalSnapshot } from "@/hooks/useChanakya";
 import { Panel, PanelHeader, MetricReadout } from "@/components/primitives";
 import { SourceTag } from "@/components/primitives/SourceTag";
 import { GraphView } from "./GraphView";
@@ -29,6 +29,7 @@ export function DigitalTwinRoom() {
   const { data: feed } = useIntelFeed();
   const { data: sourceData } = useSourceStatus();
   const { data: satellite } = useSatelliteLayers();
+  const { data: operational } = useOperationalSnapshot();
   const [sel, setSel] = useState<TwinSelection | null>(null);
   const [cascadeSel, setCascadeSel] = useState<TwinSelection | null>(null);
   const [impacted, setImpacted] = useState<Record<string, string>>({});
@@ -117,6 +118,8 @@ export function DigitalTwinRoom() {
               baseLayerId={effectiveBase}
               overlayIds={overlays}
               impacted={impacted}
+              stations={operational?.stations}
+              corridorStates={operational?.corridors}
               onSelect={setSel}
             />
             {mapMode === "satellite" && (
@@ -150,6 +153,7 @@ export function DigitalTwinRoom() {
               <Legend color="#22d3ee" label="Port" />
               <Legend color="#10b981" label="Refinery" />
               <Legend color="#6366f1" label="SPR" />
+              <Legend color="#a78bfa" label="Demand hub" />
               <Legend color="#e6edf7" label="Tanker" />
               <Legend color="#ef4444" label="Satellite / risk event" />
             </div>
@@ -179,7 +183,7 @@ export function DigitalTwinRoom() {
             sel={sel}
             network={network}
             onClose={() => setSel(null)}
-            onCascade={sel.kind !== "reserve" ? () => setCascadeSel(sel) : undefined}
+            onCascade={sel.kind !== "reserve" && sel.kind !== "demand" ? () => setCascadeSel(sel) : undefined}
           />
         </motion.div>
       )}
@@ -405,6 +409,20 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function renderInspector(sel: TwinSelection, net: NetworkData): { title: string; rows: React.ReactNode } {
+  if (sel.kind === "demand") {
+    const center = net.demand_centers.find((item) => item.id === sel.id)!;
+    return {
+      title: center.name,
+      rows: (
+        <>
+          <Row label="Region" value={center.region} />
+          <Row label="Demand share" value={`${(center.demand_share * 100).toFixed(0)}%`} />
+          <Row label="Power-linked" value={`${((center.sector_mix.power ?? 0) * 100).toFixed(0)}%`} />
+          <Row label="Supplying refineries" value={center.supplying_refinery_ids.length} />
+        </>
+      ),
+    };
+  }
   if (sel.kind === "refinery") {
     const r = net.refineries.find((x) => x.id === sel.id)!;
     return {

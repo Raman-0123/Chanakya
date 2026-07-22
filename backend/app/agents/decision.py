@@ -11,13 +11,9 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from app.domain.engine import SimulationEngine
-from app.domain.logistics import assess_logistics
+from app.domain.logistics import ProcurementOption, build_procurement_options
 from app.domain.scenarios import ResponseLevers, ScenarioSpec
-from app.db import get_repositories
-from app.core.logging import get_logger
-
-log = get_logger("agents.decision")
-
+from app.operations.models import OperationalSnapshot
 
 class EvidenceCitation(BaseModel):
     source: str
@@ -27,27 +23,7 @@ class EvidenceCitation(BaseModel):
     category: str = "baseline"
 
 
-class ProcurementAlternative(BaseModel):
-    supplier_id: str
-    supplier: str
-    crude_grade: str
-    compatible_refineries: list[str] = Field(default_factory=list)
-    volume_kbpd: float
-    route: str
-    eta_days: int
-    transit_delay_days: float
-    estimated_premium_usd_bbl: float
-    capacity_constraint: str
-    confidence: float
-    feasible: bool
-    # logistics realism (tanker availability, port congestion, war-risk)
-    port_congestion_days: float = 0.0
-    charter_delay_days: float = 0.0
-    tanker_status: str = "available"
-    war_risk_premium_usd_bbl: float = 0.0
-    landed_premium_usd_bbl: float = 0.0
-    logistics_notes: list[str] = Field(default_factory=list)
-    evidence: list[str] = Field(default_factory=list)
+ProcurementAlternative = ProcurementOption
 
 
 class StrategyProjection(BaseModel):
@@ -78,28 +54,18 @@ class StrategyOption(BaseModel):
     evidence_chain: list[EvidenceCitation] = Field(default_factory=list)
     feasible: bool = True
     infeasibility_reasons: list[str] = Field(default_factory=list)
+    optimization: dict = Field(default_factory=dict)
 
 
 # objective weights
-_W = {"continuity": 0.35, "resilience": 0.20, "affordability": 0.12,
-      "reserve": 0.13, "feasibility": 0.15, "evidence": 0.05}
-
-# lever presets — three doctrines
-_PRESETS = [
-    ("reserve_led", "Reserve-Led Stabilization",
-     "Bridge the shortfall aggressively with SPR while sourcing catches up.",
-     ResponseLevers(spr_release_pct=75, enable_reroute=True, enable_spot=True)),
-    ("diversified", "Market Diversification",
-     "Lean on spare capacity, spot cargoes and rerouting; use SPR sparingly.",
-     ResponseLevers(spr_release_pct=30, enable_reroute=True, enable_spot=True)),
-    ("measured", "Measured Conservation",
-     "Preserve reserves; absorb via rerouting and demand discipline.",
-     ResponseLevers(spr_release_pct=10, enable_reroute=True, enable_spot=True)),
-]
+_W = {"continuity": 0.30, "resilience": 0.16, "affordability": 0.10,
+      "reserve": 0.10, "feasibility": 0.14, "evidence": 0.05,
+      "council_alignment": 0.15}
 
 
 def _score(proj: StrategyProjection, daily_imports: float,
-           alternatives: list[ProcurementAlternative]) -> dict[str, float]:
+           alternatives: list[ProcurementAlternative], levers: ResponseLevers,
+           target: ResponseLevers) -> dict[str, float]:
     # Continuity is driven by the physical residual shortfall — an unmet gap is
     # penalised ~3x its import share, so a strategy that starves refineries can
     # never rank well no matter how many reserves it preserves.
@@ -113,11 +79,17 @@ def _score(proj: StrategyProjection, daily_imports: float,
     # SPR while short is a false economy, so gate it by the residual ratio.
     reserve_raw = max(0.0, 100 - proj.spr_release_kbpd / 9)
     reserve = reserve_raw * max(0.0, 1 - 2 * residual_ratio)
-    feasible_volume = sum(a.volume_kbpd for a in alternatives if a.feasible)
+    feasible_volume = sum(a.volume_kbpd for a in alternatives
+                          if a.feasible and a.arrives_within_horizon)
     required = max(1.0, proj.residual_shortfall_kbpd)
     feasibility = min(100.0, 55 + 45 * min(1.0, feasible_volume / required))
-    evidence = (sum(a.confidence for a in alternatives) / len(alternatives)
-                if alternatives else 45.0)
+    evidenced = [a for a in alternatives if a.feasible]
+    evidence = (sum(a.confidence for a in evidenced) / len(evidenced)
+                if evidenced else 35.0)
+    spr_distance = abs(levers.spr_release_pct - target.spr_release_pct)
+    flag_penalty = (18 if levers.enable_reroute != target.enable_reroute else 0) + \
+                   (18 if levers.enable_spot != target.enable_spot else 0)
+    alignment = max(0.0, 100 - spr_distance * 1.25 - flag_penalty)
 
     return {
         "continuity": round(continuity, 1),
@@ -126,86 +98,20 @@ def _score(proj: StrategyProjection, daily_imports: float,
         "reserve": round(reserve, 1),
         "feasibility": round(feasibility, 1),
         "evidence": round(evidence, 1),
+        "council_alignment": round(alignment, 1),
     }
 
 
 def build_procurement_alternatives(
     engine: SimulationEngine, spec: ScenarioSpec, required_kbpd: float,
+    operational: OperationalSnapshot | None = None,
 ) -> list[ProcurementAlternative]:
-    affected = {spec.shock.corridor_id} if spec.shock.corridor_id else set()
-    sanctioned = set(spec.shock.sanctioned_supplier_ids)
-    alternatives: list[ProcurementAlternative] = []
-    remaining = max(required_kbpd, engine.net.daily_crude_imports_kbpd * 0.05)
-    for supplier in sorted(engine.net.suppliers,
-                           key=lambda s: (s.corridor_id in affected,
-                                          -s.spare_capacity_kbpd,
-                                          s.spot_premium_usd)):
-        corridor = engine.net.corridor(supplier.corridor_id)
-        route_blocked = supplier.corridor_id in affected
-        is_sanctioned = supplier.id in sanctioned or supplier.sanctioned
-        compatible = [
-            refinery for refinery in engine.net.refineries
-            if (refinery.preferred_grade == supplier.grade or
-                supplier.grade.value == "medium_sour" or
-                refinery.preferred_grade.value == "medium_sour")
-        ]
-        compatible_capacity = sum(refinery.nameplate_kbpd for refinery in compatible)
-        receiving_port_ids = {port_id for refinery in compatible for port_id in refinery.port_ids}
-        receiving_capacity = sum(
-            port.crude_capacity_kbpd for port in engine.net.ports
-            if port.id in receiving_port_ids and port.id not in spec.shock.ports_offline
-        )
-        volume = min(supplier.spare_capacity_kbpd, remaining,
-                     compatible_capacity, receiving_capacity)
-        feasible = bool(volume > 0 and compatible and not route_blocked and not is_sanctioned)
-        if feasible:
-            remaining = max(0.0, remaining - volume)
-        reasons = []
-        if route_blocked:
-            reasons.append("route disrupted")
-        if is_sanctioned:
-            reasons.append("sanctions constraint")
-        if not compatible:
-            reasons.append("no grade-compatible refinery")
-        logi = assess_logistics(
-            engine.net, supplier, corridor, compatible, receiving_capacity,
-            spec, affected,
-        )
-        alternatives.append(ProcurementAlternative(
-            supplier_id=supplier.id, supplier=supplier.country,
-            crude_grade=supplier.grade.value,
-            compatible_refineries=[refinery.name for refinery in compatible[:6]],
-            volume_kbpd=round(volume, 1),
-            route=corridor.name if corridor else supplier.corridor_id,
-            eta_days=logi.eta_days,
-            transit_delay_days=logi.transit_delay_days,
-            estimated_premium_usd_bbl=supplier.spot_premium_usd,
-            port_congestion_days=logi.port_congestion_days,
-            charter_delay_days=logi.charter_delay_days,
-            tanker_status=logi.tanker_status,
-            war_risk_premium_usd_bbl=logi.war_risk_premium_usd_bbl,
-            landed_premium_usd_bbl=logi.landed_premium_usd_bbl,
-            logistics_notes=logi.notes,
-            capacity_constraint=("; ".join(reasons) if reasons else
-                                 f"Supplier {supplier.spare_capacity_kbpd:,.0f}; "
-                                 f"compatible refining {compatible_capacity:,.0f}; "
-                                 f"receiving ports {receiving_capacity:,.0f} kbpd"),
-            confidence=round(min(92, supplier.reliability * (0.75 if feasible else 0.45)), 1),
-            feasible=feasible,
-            evidence=[
-                "Supplier capacity and grade from CHANAKYA versioned baseline.",
-                "Route feasibility evaluated against the active scenario shock.",
-                f"ETA {logi.eta_days}d incl. {logi.transit_delay_days:.1f}d friction; "
-                f"landed +${logi.landed_premium_usd_bbl:.1f}/bbl.",
-            ],
-        ))
-    alternatives.sort(key=lambda item: (not item.feasible, -item.confidence,
-                                        item.estimated_premium_usd_bbl))
-    return alternatives[:6]
+    return build_procurement_options(engine.net, spec, required_kbpd, operational)[:6]
 
 
 def build_evidence_chain(
     spec: ScenarioSpec, alternatives: list[ProcurementAlternative],
+    operational: OperationalSnapshot | None = None,
 ) -> list[EvidenceCitation]:
     """Build evidence citations linking a strategy to its supporting data.
 
@@ -244,27 +150,18 @@ def build_evidence_chain(
                   f"via {top.route} — {top.volume_kbpd:.0f} kbpd @ +${top.estimated_premium_usd_bbl:.1f}/bbl",
             confidence=top.confidence, category="procurement",
         ))
-    # 5. Try to pull recent events from the repository (non-blocking)
-    try:
-        import asyncio
-        repo = get_repositories()
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # We're already in an async context; can't await here,
-            # but rank_strategies is sync. Add baseline evidence instead.
-            pass
-        else:
-            events = loop.run_until_complete(repo.list_events(limit=5))
-            for evt in events[:3]:
-                citations.append(EvidenceCitation(
-                    source=evt.get("source", "Intelligence Feed"),
-                    event_id=evt.get("id"),
-                    title=evt.get("title", "Live intelligence event"),
-                    confidence=evt.get("confidence", 60),
-                    category=evt.get("category", "geopolitical"),
-                ))
-    except Exception:  # noqa: BLE001
-        pass
+    # 5. The exact snapshot evidence used for this calculation.  This replaces
+    # the old best-effort synchronous repository lookup, which was skipped while
+    # the council event loop was running.
+    if operational is not None:
+        for event in operational.evidence_events[:4]:
+            citations.append(EvidenceCitation(
+                source=event.get("source", "Operational snapshot"),
+                event_id=event.get("id"),
+                title=event.get("title", "Current intelligence signal"),
+                confidence=float(event.get("confidence", 60)),
+                category="live_intelligence",
+            ))
     # 6. Baseline data evidence
     citations.append(EvidenceCitation(
         source="CHANAKYA Baseline Network v1",
@@ -275,11 +172,22 @@ def build_evidence_chain(
 
 
 def rank_strategies(
-    engine: SimulationEngine, spec: ScenarioSpec, daily_imports: float
+    engine: SimulationEngine, spec: ScenarioSpec, daily_imports: float,
+    assessments: list | None = None,
+    operational: OperationalSnapshot | None = None,
 ) -> list[StrategyOption]:
+    target = _council_target(assessments or [], spec.default_levers)
+    spr_levels = set(range(0, 101, 10))
+    spr_levels.add(int(round(target.spr_release_pct / 5) * 5))
+    candidates = [
+        ResponseLevers(spr_release_pct=spr, enable_reroute=reroute, enable_spot=spot)
+        for spr in sorted(spr_levels)
+        for reroute in (False, True)
+        for spot in (False, True)
+    ]
     options: list[StrategyOption] = []
-    for sid, title, thesis, levers in _PRESETS:
-        r = engine.run(spec, levers)
+    for levers in candidates:
+        r = engine.run(spec, levers, operational)
         proj = StrategyProjection(
             residual_shortfall_kbpd=r.residual_shortfall_kbpd,
             national_utilization_pct=r.national_utilization_pct,
@@ -290,67 +198,147 @@ def rank_strategies(
             nesi_after=r.nesi_after.value,
             est_daily_cost_musd=r.est_daily_cost_musd,
         )
-        alternatives = build_procurement_alternatives(engine, spec, r.supply_gap_kbpd)
-        scores = _score(proj, daily_imports, alternatives)
+        alternatives = r.procurement_plan[:6]
+        scores = _score(proj, daily_imports, alternatives, levers, target)
         total = round(sum(scores[k] * _W[k] for k in _W), 1)
-        feasible_volume = sum(a.volume_kbpd for a in alternatives if a.feasible)
+        feasible_volume = sum(a.volume_kbpd for a in alternatives
+                              if a.feasible and a.arrives_within_horizon)
         infeasibility = []
         if r.residual_shortfall_kbpd > 0 and feasible_volume <= 0:
             infeasibility.append("No feasible replacement cargo is available within the modeled network.")
         if r.feasibility_warnings:
             infeasibility.extend(r.feasibility_warnings)
-        evidence_chain = build_evidence_chain(spec, alternatives)
+        evidence_chain = build_evidence_chain(spec, alternatives, operational)
+        sid = (f"response_spr{int(levers.spr_release_pct):03d}_"
+               f"r{int(levers.enable_reroute)}_s{int(levers.enable_spot)}")
+        title, thesis = _strategy_identity(levers, r)
         options.append(StrategyOption(
             id=sid, title=title, thesis=thesis, levers=levers,
-            benefits=_benefits(sid, proj),
-            tradeoffs=_tradeoffs(sid, proj),
-            implementation_steps=_steps(sid),
+            benefits=_benefits(levers, proj),
+            tradeoffs=_tradeoffs(levers, proj),
+            implementation_steps=_steps(levers, alternatives, r),
             projection=proj, scores=scores, score=total,
             confidence=round(min(95, 55 + total * 0.35), 1),
             procurement_alternatives=alternatives,
             evidence_chain=evidence_chain,
             feasible=not infeasibility,
             infeasibility_reasons=infeasibility,
+            optimization={
+                "method": "enumerated constraint search",
+                "candidate_count": len(candidates),
+                "operational_snapshot_id": operational.id if operational else None,
+                "council_target": target.model_dump(),
+                "council_alignment": scores["council_alignment"],
+            },
         ))
 
     options.sort(key=lambda o: (o.feasible, o.score), reverse=True)
-    for i, o in enumerate(options):
+    # Return three materially distinct plans rather than three labels over almost
+    # identical settings.
+    selected: list[StrategyOption] = []
+    for option in options:
+        if not selected or all(
+            abs(option.levers.spr_release_pct - chosen.levers.spr_release_pct) >= 15
+            or option.levers.enable_reroute != chosen.levers.enable_reroute
+            or option.levers.enable_spot != chosen.levers.enable_spot
+            for chosen in selected
+        ):
+            selected.append(option)
+        if len(selected) == 3:
+            break
+    if len(selected) < 3:
+        remaining_options = [option for option in options if option not in selected]
+        selected.extend(remaining_options[:3 - len(selected)])
+    for i, o in enumerate(selected):
         o.rank = i + 1
-    return options
+    return selected
 
 
-def _benefits(sid: str, p: StrategyProjection) -> list[str]:
+def _benefits(levers: ResponseLevers, p: StrategyProjection) -> list[str]:
     common = [f"Refinery utilisation held at {p.national_utilization_pct:.0f}%.",
               f"Security Index projected at {p.nesi_after:.0f}."]
-    if sid == "reserve_led":
+    if levers.spr_release_pct >= 60:
         return ["Fastest closure of the physical supply gap.",
                 f"Residual shortfall cut to {p.residual_shortfall_kbpd:,.0f} kbpd."] + common
-    if sid == "diversified":
+    if levers.enable_reroute and levers.enable_spot:
         return ["Balances supply continuity with reserve preservation.",
                 "Limits fiscal and reserve exposure."] + common
     return ["Maximum strategic-reserve preservation.",
             f"Reserve draw minimised to {p.spr_release_kbpd:,.0f} kbpd."] + common
 
 
-def _tradeoffs(sid: str, p: StrategyProjection) -> list[str]:
-    if sid == "reserve_led":
+def _tradeoffs(levers: ResponseLevers, p: StrategyProjection) -> list[str]:
+    if levers.spr_release_pct >= 60:
         return [f"Heavy SPR draw ({p.spr_release_kbpd:,.0f} kbpd) erodes buffer.",
                 "Vulnerable if the disruption extends beyond forecast."]
-    if sid == "diversified":
+    if levers.enable_reroute and levers.enable_spot:
         return [f"Leaves {p.residual_shortfall_kbpd:,.0f} kbpd residual if spare is thin.",
                 "Exposed to spot-price spikes."]
     return [f"Largest residual shortfall ({p.residual_shortfall_kbpd:,.0f} kbpd).",
             f"Higher price pass-through (Brent {p.brent_change_pct:+.0f}%)."]
 
 
-def _steps(sid: str) -> list[str]:
+def _steps(
+    levers: ResponseLevers,
+    alternatives: list[ProcurementAlternative],
+    result,
+) -> list[str]:
     base = ["Convene inter-ministerial crisis cell.",
             "Notify IOCL / BPCL / HPCL procurement desks."]
-    if sid == "reserve_led":
-        return base + ["Authorise phased SPR drawdown from Vizag/Mangalore/Padur.",
-                       "Sequence replacement cargoes to refill behind the draw."]
-    if sid == "diversified":
-        return base + ["Issue urgent spot tenders to Gulf/Atlantic spare holders.",
-                       "Reserve Cape-route tanker capacity + war-risk cover."]
-    return base + ["Hold SPR; issue demand-management advisory.",
-                   "Stage contingency SPR authorisation if duration extends."]
+    steps = list(base)
+    for option in [a for a in alternatives if a.feasible][:3]:
+        timing = "within horizon" if option.arrives_within_horizon else "replenishment phase"
+        steps.append(
+            f"Tender {option.volume_kbpd:,.0f} kbpd {option.crude_grade} from "
+            f"{option.supplier} via {option.route}; ETA {option.eta_days} days, "
+            f"landed premium +${option.landed_premium_usd_bbl:.1f}/bbl ({timing})."
+        )
+    if levers.spr_release_pct > 0:
+        steps.append(
+            f"Authorise a metered SPR draw up to {result.spr_release_kbpd:,.0f} kbpd; "
+            "record daily site inventory and stop conditions."
+        )
+    if levers.enable_reroute and result.rerouted_kbpd > 0:
+        steps.append(
+            f"Secure tonnage for {result.rerouted_kbpd:,.0f} kbpd of rerouted cargo "
+            f"with {result.transit_delay_days:.0f}-day added transit."
+        )
+    if not levers.enable_spot:
+        steps.append("Hold spot buying; pre-authorise only if the residual gap breaches threshold.")
+    return steps
+
+
+def _council_target(assessments: list, fallback: ResponseLevers) -> ResponseLevers:
+    proposed = [(getattr(item, "proposed_levers", None),
+                 max(1.0, float(getattr(item, "confidence", 60)))) for item in assessments]
+    proposed = [(lever, weight) for lever, weight in proposed if lever is not None]
+    if not proposed:
+        return fallback
+    total = sum(weight for _, weight in proposed)
+    spr = sum(lever.spr_release_pct * weight for lever, weight in proposed) / total
+    reroute = sum(weight for lever, weight in proposed if lever.enable_reroute) >= total / 2
+    spot = sum(weight for lever, weight in proposed if lever.enable_spot) >= total / 2
+    return ResponseLevers(spr_release_pct=round(spr / 5) * 5,
+                          enable_reroute=reroute, enable_spot=spot)
+
+
+def _strategy_identity(levers: ResponseLevers, result) -> tuple[str, str]:
+    if levers.spr_release_pct >= 60:
+        return (
+            "Accelerated Reserve Bridge",
+            "Use a high but bounded SPR release while verified replacement cargoes travel.",
+        )
+    if levers.enable_reroute and levers.enable_spot:
+        return (
+            "Adaptive Diversification",
+            "Combine feasible route diversion, grade-compatible tenders and a measured reserve bridge.",
+        )
+    if levers.spr_release_pct <= 20:
+        return (
+            "Reserve Conservation",
+            "Preserve strategic inventory and accept tightly managed demand or run-rate reductions.",
+        )
+    return (
+        "Balanced Continuity",
+        f"Balance a {levers.spr_release_pct:.0f}% reserve posture against verified cargo arrivals.",
+    )

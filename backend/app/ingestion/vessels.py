@@ -8,7 +8,9 @@ tanker positions along each corridor from the domain model so the map is alive.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 import json
+import math
 import random
 
 import websockets
@@ -26,6 +28,53 @@ _TANKER_NAMES = [
     "Bay Mariner", "Konkan Star", "Vindhya Spirit", "Sagar Kanya", "Aravalli",
     "Malabar Dawn", "Coromandel", "Sindhu Prabha", "Kaveri Trader", "Nilgiri",
 ]
+
+# Focus the paid/live firehose on the actual energy network instead of treating
+# every ship from Cape Town to Suez as an Indian crude tanker.
+_MONITORED_BOXES = [
+    [[22.0, 52.0], [31.5, 61.5]],      # Persian Gulf / Hormuz
+    [[8.0, 30.0], [32.5, 46.0]],       # Suez / Red Sea / Bab-el-Mandeb
+    [[-38.0, 12.0], [-25.0, 28.0]],    # Cape of Good Hope
+    [[5.0, 66.0], [24.0, 90.0]],       # Arabian Sea + Indian crude terminals
+    [[-12.0, 45.0], [16.0, 76.0]],     # western Indian Ocean approach
+]
+
+
+def _ship_kind(type_code: int | None) -> str:
+    if type_code is None:
+        return "unknown"
+    if 80 <= type_code <= 89:
+        return "tanker"
+    if 70 <= type_code <= 79:
+        return "cargo"
+    if 60 <= type_code <= 69:
+        return "passenger"
+    if 30 <= type_code <= 39:
+        return "special"
+    return "other"
+
+
+def _point_segment_distance(lat: float, lon: float, a, b) -> float:
+    """Approximate point-to-route distance in degrees for a local geofence."""
+    mean_lat = math.radians((a.lat + b.lat + lat) / 3)
+    x, y = lon * math.cos(mean_lat), lat
+    ax, ay = a.lon * math.cos(mean_lat), a.lat
+    bx, by = b.lon * math.cos(mean_lat), b.lat
+    dx, dy = bx - ax, by - ay
+    if dx == 0 and dy == 0:
+        return math.hypot(x - ax, y - ay)
+    t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(x - (ax + t * dx), y - (ay + t * dy))
+
+
+def assign_corridor(lat: float, lon: float, threshold_deg: float = 3.2) -> str | None:
+    best: tuple[float, str] | None = None
+    for corridor in _net.corridors:
+        for a, b in zip(corridor.path, corridor.path[1:]):
+            distance = _point_segment_distance(lat, lon, a, b)
+            if best is None or distance < best[0]:
+                best = (distance, corridor.id)
+    return best[1] if best and best[0] <= threshold_deg else None
 
 
 def _interp(a: dict, b: dict, t: float) -> tuple[float, float]:
@@ -81,7 +130,7 @@ def synthetic_vessels(per_corridor: int = 4, seed: int = 7) -> list[Vessel]:
                 heading=round(rng.uniform(40, 110), 0),
                 speed_kn=0.0 if disrupted else round(rng.uniform(9, 15), 1),
                 corridor_id=corr.id, origin=origin, destination="India (west coast)",
-                cargo_kbbl=round(rng.uniform(600, 2000), 0),
+                cargo_kbbl=round(rng.uniform(600, 2000), 0), kind="crude_tanker",
                 track=track,
                 source_kind=SourceKind.REPLAY,
             ))
@@ -101,11 +150,21 @@ class AISCollector:
 
     def __init__(self) -> None:
         self._vessels: dict[str, Vessel] = {}
+        self._static: dict[str, dict] = {}
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
     def snapshot(self) -> list[Vessel]:
-        return list(self._vessels.values())[:150]
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        stale = [mmsi for mmsi, vessel in self._vessels.items()
+                 if vessel.last_seen_at < cutoff]
+        for mmsi in stale:
+            self._vessels.pop(mmsi, None)
+        # Energy operations prioritise identified tankers; retain unknowns only
+        # as low-trust situational context and never use them for capacity math.
+        rows = sorted(self._vessels.values(),
+                      key=lambda v: ("tanker" not in v.kind, -v.last_seen_at.timestamp()))
+        return rows[:150]
 
     async def _loop(self) -> None:
         delay = 2
@@ -115,25 +174,64 @@ class AISCollector:
                                               ping_interval=20, ping_timeout=20) as socket:
                     await socket.send(json.dumps({
                         "APIKey": settings.aisstream_api_key,
-                        "BoundingBoxes": [[[-40.0, 15.0], [32.0, 90.0]]],
-                        "FilterMessageTypes": ["PositionReport"],
+                        "BoundingBoxes": _MONITORED_BOXES,
+                        "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
                     }))
                     delay = 2
                     async for raw in socket:
                         if self._stop.is_set():
                             break
                         payload = json.loads(raw)
-                        report = payload.get("Message", {}).get("PositionReport", {})
+                        message_type = payload.get("MessageType")
+                        message = payload.get("Message", {})
                         meta = payload.get("MetaData", {})
+                        if message_type == "ShipStaticData":
+                            static = message.get("ShipStaticData", {})
+                            mmsi = str(meta.get("MMSI") or static.get("UserID") or "")
+                            if mmsi:
+                                self._static[mmsi] = {
+                                    "name": (static.get("Name") or meta.get("ShipName") or "").strip(" @"),
+                                    "type": static.get("Type"),
+                                    "imo": static.get("ImoNumber") or None,
+                                    "destination": (static.get("Destination") or "").strip(" @") or None,
+                                }
+                                existing = self._vessels.get(mmsi)
+                                if existing:
+                                    info = self._static[mmsi]
+                                    existing.kind = _ship_kind(info.get("type"))
+                                    existing.ship_type_code = info.get("type")
+                                    existing.imo = info.get("imo")
+                                    existing.destination_reported = info.get("destination")
+                                    if info.get("name"):
+                                        existing.name = info["name"]
+                            continue
+                        if message_type != "PositionReport":
+                            continue
+                        report = message.get("PositionReport", {})
                         mmsi = str(meta.get("MMSI") or report.get("UserID") or "")
                         lat, lon = report.get("Latitude"), report.get("Longitude")
                         if not mmsi or lat is None or lon is None:
                             continue
+                        lat, lon = float(lat), float(lon)
+                        speed = float(report.get("Sog") or 0)
+                        if not (-90 <= lat <= 90 and -180 <= lon <= 180 and 0 <= speed <= 45):
+                            continue
+                        now = datetime.now(timezone.utc)
+                        existing = self._vessels.get(mmsi)
+                        track = list(existing.track[-11:]) if existing else []
+                        track.append([round(lat, 5), round(lon, 5)])
+                        info = self._static.get(mmsi, {})
+                        heading = float(report.get("TrueHeading") or report.get("Cog") or 0)
+                        if heading > 360:
+                            heading = float(report.get("Cog") or 0)
                         self._vessels[mmsi] = Vessel(
-                            id=mmsi, name=(meta.get("ShipName") or f"AIS {mmsi}").strip(),
-                            lat=float(lat), lon=float(lon),
-                            heading=float(report.get("TrueHeading") or report.get("Cog") or 0),
-                            speed_kn=float(report.get("Sog") or 0),
+                            id=mmsi,
+                            name=(info.get("name") or meta.get("ShipName") or f"AIS {mmsi}").strip(),
+                            kind=_ship_kind(info.get("type")), lat=lat, lon=lon,
+                            heading=heading, speed_kn=speed,
+                            corridor_id=assign_corridor(lat, lon), track=track,
+                            imo=info.get("imo"), ship_type_code=info.get("type"),
+                            destination_reported=info.get("destination"), last_seen_at=now,
                             source_kind=SourceKind.LIVE,
                         )
             except Exception as exc:  # noqa: BLE001

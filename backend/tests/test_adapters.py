@@ -6,6 +6,8 @@ from app.ingestion.models import SourceKind
 from app.ingestion.prices import fetch_prices
 from app.ingestion.supplemental import fetch_firms_events, get_ppac_snapshot
 from app.ingestion.weather import fetch_weather
+from app.ingestion.vessels import _ship_kind, assign_corridor
+from app.ingestion.sanctions import _COUNTRY_NAMES
 
 
 class FailingClient:
@@ -47,3 +49,12 @@ async def test_unconfigured_sources_are_honest(monkeypatch) -> None:
     assert all(item.source_kind == SourceKind.SIMULATED for item in prices)
     assert await fetch_firms_events() == []
     assert get_ppac_snapshot().provenance == SourceKind.CACHED
+
+
+def test_ais_type_and_route_geofencing_are_not_assumed() -> None:
+    assert _ship_kind(None) == "unknown"
+    assert _ship_kind(84) == "tanker"
+    assert _ship_kind(72) == "cargo"
+    assert assign_corridor(26.57, 56.25) == "hormuz"
+    assert assign_corridor(45.0, -30.0) is None
+    assert _COUNTRY_NAMES["RU"] == "Russia"

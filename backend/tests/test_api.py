@@ -48,6 +48,48 @@ async def test_operator_can_activate_persistent_mission(monkeypatch) -> None:
         assert accepted.json()["status"] == "active"
 
 
+@pytest.mark.asyncio
+async def test_operator_activates_selected_strategy_and_updates_real_tasks(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "operator_pin", "correct-pin")
+    repositories = get_repositories()
+    workflow = await repositories.save_workflow({
+        "workflow_run_id": "wf-selected-strategy-test",
+        "scenario_id": "hormuz_closure",
+        "status": "completed",
+        "result": {
+            "strategies": [
+                {"id": "recommended", "implementation_steps": ["Recommended action"]},
+                {"id": "operator-choice", "implementation_steps": ["Chosen cargo tender"]},
+            ],
+        },
+    })
+    mission = await repositories.create_mission(
+        "hormuz_closure", "recommended", workflow["workflow_run_id"],
+        {"strategy": workflow["result"]["strategies"][0], "tasks": []},
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        activated = await client.post(
+            f"/api/missions/{mission['id']}/activate",
+            headers={"X-Operator-Pin": "correct-pin"},
+            json={"strategy_id": "operator-choice"},
+        )
+        assert activated.status_code == 200
+        body = activated.json()
+        assert body["strategy_id"] == "operator-choice"
+        assert body["strategy"]["implementation_steps"] == ["Chosen cargo tender"]
+        assert body["tasks"][0]["status"] == "queued"
+
+        updated = await client.post(
+            f"/api/missions/{mission['id']}/tasks/task-01",
+            headers={"X-Operator-Pin": "correct-pin"},
+            json={"status": "completed", "note": "Tender issued"},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["tasks"][0]["completed_at"]
+        assert updated.json()["status"] == "completed"
+
+
 def test_websocket_heartbeat_contract() -> None:
     ws_app = FastAPI()
     ws_app.include_router(realtime_router, prefix="/api")

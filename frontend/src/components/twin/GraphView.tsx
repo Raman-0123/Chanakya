@@ -10,18 +10,19 @@ import ReactFlow, {
   BackgroundVariant,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { Search, Zap, Eye, X, Database, Filter, Layers, HelpCircle } from "lucide-react";
+import { Search, Zap, Eye, X, Layers, Network } from "lucide-react";
 import {
   useGraph,
+  useIntelFeed,
   useOntologyExplore,
   useOntologyImpact,
+  useOntologySchema,
   useOntologySearch,
   useOntologyStats,
 } from "@/hooks/useChanakya";
 import { Panel, PanelHeader } from "@/components/primitives";
 import { SourceTag } from "@/components/primitives/SourceTag";
 import { SEVERITY_META, type Severity } from "@/lib/severity";
-import type { GraphNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const TYPE_COLOR: Record<string, string> = {
@@ -37,6 +38,7 @@ const TYPE_COLOR: Record<string, string> = {
   agency: "#8b5cf6",
   grade: "#f97316",
   indicator: "#06b6d4",
+  demand: "#a78bfa",
   entity: "#8b99b3",
 };
 
@@ -53,11 +55,16 @@ function getNodeColor(type: string, meta: Record<string, unknown> = {}): string 
 }
 
 function getSublabel(type: string, meta: Record<string, unknown> = {}): string {
+  const percentage = (value: unknown): string => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "—";
+    return `${number <= 1 ? Math.round(number * 100) : Math.round(number)}`;
+  };
   switch (type) {
     case "supplier":
-      return `${meta.share ?? meta.import_share ?? "—"}% share${meta.sanctioned ? " · sanctioned" : ""}`;
+      return `${percentage(meta.share ?? meta.import_share)}% share${meta.sanctioned ? " · sanctioned" : ""}`;
     case "corridor":
-      return `${meta.share ?? meta.import_share ?? "—"}% · ${meta.status ?? "active"}`;
+      return `${percentage(meta.share ?? meta.import_share)}% · ${meta.status ?? "active"}`;
     case "port":
       return `${meta.capacity ?? meta.capacity_kbpd ?? "—"} kbpd`;
     case "refinery":
@@ -70,6 +77,8 @@ function getSublabel(type: string, meta: Record<string, unknown> = {}): string {
       return `${meta.speed_kn ?? "—"} kn`;
     case "agency":
       return `${meta.domain ?? "govt"}`;
+    case "demand":
+      return `${Number(meta.demand_share ?? 0) <= 1 ? Math.round(Number(meta.demand_share ?? 0) * 100) : meta.demand_share ?? "—"}% demand`;
     case "pipeline":
       return `${meta.status ?? "operational"}`;
     default:
@@ -80,8 +89,28 @@ function getSublabel(type: string, meta: Record<string, unknown> = {}): string {
 export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
   const { data: baseGraph, isLoading: baseLoading } = useGraph();
   const { data: stats } = useOntologyStats();
+  const { data: schema } = useOntologySchema();
+  const { data: intelFeed } = useIntelFeed();
+  const observedEvents = useMemo(
+    () => {
+      const rank: Record<string, number> = {
+        live: 0,
+        cached: 1,
+        replay: 2,
+        simulated: 3,
+        unavailable: 4,
+      };
+      return [...(intelFeed?.events ?? [])]
+        .filter((event) => event.affected_corridors.length > 0)
+        .sort((left, right) =>
+          (rank[left.source_kind] ?? 9) - (rank[right.source_kind] ?? 9)
+          || right.risk_score - left.risk_score,
+        );
+    },
+    [intelFeed],
+  );
 
-  const [activeTab, setActiveTab] = useState<"network" | "explore" | "impact">(
+  const [activeTab, setActiveTab] = useState<"network" | "explore" | "impact" | "schema">(
     forceExploreId ? "explore" : "network"
   );
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(
@@ -95,7 +124,7 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
     }
   }, [forceExploreId]);
 
-  const [selectedEventId, setSelectedEventId] = useState<string>("hormuz_closure");
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showEdgeLabels, setShowEdgeLabels] = useState(true);
   const [selectedNodeDetail, setSelectedNodeDetail] = useState<{
@@ -104,6 +133,16 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
     label: string;
     meta: Record<string, unknown>;
   } | null>(null);
+
+  useEffect(() => {
+    if (!observedEvents.length) {
+      setSelectedEventId(null);
+      return;
+    }
+    if (!selectedEventId || !observedEvents.some((event) => event.id === selectedEventId)) {
+      setSelectedEventId(observedEvents[0].id);
+    }
+  }, [observedEvents, selectedEventId]);
 
   // Queries for interactive modes
   const { data: exploreData, isLoading: exploreLoading } = useOntologyExplore(
@@ -169,7 +208,7 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
       nodesByType[t].push(n);
     });
 
-    const typeOrder = ["supplier", "event", "corridor", "port", "reserve", "refinery", "vessel", "country", "pipeline", "agency", "indicator", "entity"];
+    const typeOrder = ["supplier", "event", "corridor", "port", "reserve", "refinery", "demand", "vessel", "country", "pipeline", "agency", "indicator", "entity"];
     const activeTypes = Object.keys(nodesByType).sort((a, b) => {
       const idxA = typeOrder.indexOf(a);
       const idxB = typeOrder.indexOf(b);
@@ -269,11 +308,14 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
       const detail = {
         id: node.id,
         type: found?.type || "entity",
-        label: (node.data.label as any)?.props?.children[0]?.props?.children[0]?.props?.children || node.id,
+        label: found?.label || node.id,
         meta: found?.meta || {},
       };
       setSelectedNodeDetail(detail);
       setSelectedEntityId(node.id);
+      if (detail.type === "event") {
+        setSelectedEventId(node.id.split(":", 2)[1] ?? node.id);
+      }
     },
     [baseGraph, exploreData, impactData]
   );
@@ -311,18 +353,43 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
             <Eye size={13} /> 2-Hop Explorer
           </button>
           <button
-            onClick={() => setActiveTab("impact")}
+            onClick={() => observedEvents.length > 0 && setActiveTab("impact")}
+            disabled={observedEvents.length === 0}
             className={cn(
               "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
-              activeTab === "impact" ? "bg-signal/15 text-signal" : "text-ink-dim hover:text-ink"
+              activeTab === "impact" ? "bg-signal/15 text-signal" : "text-ink-dim hover:text-ink",
+              observedEvents.length === 0 && "cursor-not-allowed opacity-40",
             )}
           >
             <Zap size={13} /> Impact Trace
+          </button>
+          <button
+            onClick={() => setActiveTab("schema")}
+            className={cn(
+              "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
+              activeTab === "schema" ? "bg-signal/15 text-signal" : "text-ink-dim hover:text-ink",
+            )}
+          >
+            <Network size={13} /> Schema
           </button>
         </Panel>
 
         {/* Search & Statistics Bar */}
         <Panel className="pointer-events-auto flex items-center gap-3 px-3 py-1.5">
+          {activeTab === "impact" && observedEvents.length > 0 && (
+            <select
+              aria-label="Observed event to trace"
+              value={selectedEventId ?? ""}
+              onChange={(event) => setSelectedEventId(event.target.value)}
+              className="max-w-64 rounded border border-critical/40 bg-panel-raised px-2 py-1 text-xs text-ink focus:outline-none"
+            >
+              {observedEvents.map((event) => (
+                <option key={event.id} value={event.id}>
+                  {event.source_kind.toUpperCase()} · {event.title.slice(0, 70)}
+                </option>
+              ))}
+            </select>
+          )}
           {/* Search Input */}
           <div className="relative flex items-center">
             <Search size={13} className="absolute left-2.5 text-ink-dim" />
@@ -374,7 +441,7 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
           )}
 
           {/* Backend Status Tag */}
-          <SourceTag kind={isDegraded ? "simulated" : "live"} />
+          <SourceTag kind={isDegraded ? "local_graph" : "neo4j"} />
         </Panel>
       </div>
 
@@ -393,28 +460,98 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
         <Controls className="!border-line !bg-panel" />
       </ReactFlow>
 
-      {/* Impact Trace Chain Overlay (bottom center) */}
-      {activeTab === "impact" && impactData && impactData.chain && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 z-[450] max-w-3xl w-full px-4">
-          <Panel className="pointer-events-auto p-3">
-            <div className="mb-1.5 flex items-center justify-between text-xs">
-              <span className="font-semibold text-critical flex items-center gap-1">
-                <Zap size={14} /> Causal Disruption Chain
+      {activeTab === "explore" && selectedEntityId && exploreData?.nodes.length === 0 && (
+        <div className="pointer-events-none absolute inset-0 z-[420] grid place-items-center">
+          <Panel className="max-w-md p-5 text-center">
+            <div className="text-sm font-semibold text-critical">Entity not found</div>
+            <p className="mt-1 text-xs text-ink-muted">
+              {selectedEntityId} has no canonical ontology identity. Search for a valid entity and try again.
+            </p>
+          </Panel>
+        </div>
+      )}
+
+      {activeTab === "schema" && schema && (
+        <div className="absolute inset-x-6 bottom-6 top-20 z-[430] overflow-y-auto rounded-lg border border-line bg-void/95 p-5 backdrop-blur">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <div className="label-terminal">Ontology contract · v{schema.schema_version}</div>
+              <h3 className="text-lg font-semibold text-ink">Classes, relations and provenance</h3>
+              <p className="mt-1 max-w-3xl text-xs text-ink-muted">{schema.identity}</p>
+            </div>
+            <SourceTag kind={isDegraded ? "local_graph" : "neo4j"} />
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Panel className="p-4">
+              <div className="label-terminal mb-3">Entity classes</div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {schema.node_types.map((nodeType) => (
+                  <div key={nodeType.type} className="rounded border border-line bg-panel-raised p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold" style={{ color: getNodeColor(nodeType.type) }}>
+                        {nodeType.label}
+                      </span>
+                      <span className="font-mono text-[9px] text-ink-dim">{nodeType.prefix}:*</span>
+                    </div>
+                    <div className="mt-1 font-mono text-[9px] uppercase text-ink-dim">
+                      {nodeType.temporal ? "Temporal observation" : "Baseline entity"}
+                    </div>
+                    <div className="mt-2 text-[10px] text-ink-muted">{nodeType.required.join(" · ")}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+            <Panel className="p-4">
+              <div className="label-terminal mb-3">Relationship semantics</div>
+              <div className="space-y-2">
+                {schema.relationship_types.map((relationship) => (
+                  <div key={relationship.type} className="rounded border border-line bg-panel-raised px-3 py-2">
+                    <div className="font-mono text-xs font-semibold text-signal">{relationship.type}</div>
+                    <div className="mt-0.5 text-[10px] text-ink">
+                      {relationship.from.join(" | ")} → {relationship.to.join(" | ")}
+                    </div>
+                    <div className="mt-1 text-[10px] text-ink-muted">{relationship.meaning}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+        </div>
+      )}
+
+      {/* Separate causal paths; branches are never flattened into one false chain. */}
+      {activeTab === "impact" && impactData && (
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-[450] w-full max-w-5xl -translate-x-1/2 px-4">
+          <Panel className="pointer-events-auto max-h-56 overflow-y-auto p-3">
+            <div className="mb-2 flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1 font-semibold text-critical">
+                <Zap size={14} /> Evidence-linked causal paths
               </span>
               <span className="font-mono text-[10px] text-ink-dim">
-                Event: {impactData.event_id}
+                Event: {impactData.event_id} · {impactData.paths.length} paths
               </span>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              {impactData.chain.map((step, idx) => (
-                <div key={idx} className="flex items-center gap-1.5">
-                  <span className="rounded border border-line-strong bg-panel-raised px-2 py-0.5 font-mono text-[10px] text-ink">
-                    {step.label}
-                  </span>
-                  {idx < impactData.chain.length - 1 && <span className="text-critical font-bold">→</span>}
-                </div>
-              ))}
-            </div>
+            {impactData.paths.length === 0 ? (
+              <p className="text-xs text-elevated">
+                {impactData.message ?? "No explicit relationship exists. The system did not guess a corridor."}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {impactData.paths.slice(0, 8).map((path, pathIndex) => (
+                  <div key={pathIndex} className="flex min-w-max items-center gap-1.5 overflow-x-auto text-xs">
+                    <span className="w-10 shrink-0 font-mono text-[9px] text-ink-dim">P{pathIndex + 1}</span>
+                    {path.map((step, stepIndex) => (
+                      <div key={`${step.id}-${stepIndex}`} className="flex items-center gap-1.5">
+                        <span className="rounded border border-line-strong bg-panel-raised px-2 py-0.5 font-mono text-[10px] text-ink">
+                          {step.label}
+                        </span>
+                        {stepIndex < path.length - 1 && <span className="font-bold text-critical">→</span>}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </Panel>
         </div>
       )}
@@ -456,6 +593,17 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
                 >
                   Explore 2-Hop Graph
                 </button>
+                {selectedNodeDetail.type === "event" && (
+                  <button
+                    onClick={() => {
+                      setSelectedEventId(selectedNodeDetail.id.split(":", 2)[1] ?? selectedNodeDetail.id);
+                      setActiveTab("impact");
+                    }}
+                    className="flex-1 rounded border border-critical/40 bg-critical/10 py-1.5 text-xs font-medium text-critical hover:bg-critical/20"
+                  >
+                    Trace Impact
+                  </button>
+                )}
               </div>
             </div>
           </Panel>

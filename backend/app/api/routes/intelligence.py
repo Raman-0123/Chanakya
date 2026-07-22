@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from app.domain import build_energy_network
 from app.domain.risk_scoring import assess_disruption_risk
+from app.operations import get_operational_service
 from app.ingestion import get_intelligence_service
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
@@ -82,7 +83,8 @@ async def get_geospatial_layer() -> dict:
     thermal detections — one FeatureCollection the map can render directly.
     """
     feed = await get_intelligence_service().feed()
-    risk = {c.corridor_id: c for c in assess_disruption_risk(_network, feed.events).corridors}
+    operational = get_operational_service().update(feed)
+    risk = {c.corridor_id: c for c in operational.corridors}
     features: list[dict] = []
 
     for corr in _network.corridors:
@@ -119,6 +121,13 @@ async def get_geospatial_layer() -> dict:
             {"kind": "reserve", "id": res.id, "name": res.name,
              "stored_mmt": res.stored_mmt, "fill_pct": res.fill_pct},
         ))
+    for center in _network.demand_centers:
+        features.append(_feature(
+            "Point", [center.coords.lon, center.coords.lat],
+            {"kind": "demand", "id": center.id, "name": center.name,
+             "region": center.region, "demand_share": center.demand_share,
+             "sector_mix": center.sector_mix},
+        ))
     for v in feed.vessels:
         features.append(_feature(
             "Point", [v.lon, v.lat],
@@ -140,6 +149,16 @@ async def get_geospatial_layer() -> dict:
             {"kind": "satellite", "id": d.id, "brightness_k": d.brightness_k,
              "confidence": d.confidence, "near_asset": d.near_asset,
              "provenance": d.source_kind.value},
+        ))
+    for station in operational.stations:
+        features.append(_feature(
+            "Point", [station.lon, station.lat],
+            {"kind": "station", "station_kind": station.kind, "id": station.id,
+             "name": station.name, "status": station.status,
+             "risk_score": station.risk_score, "provenance": station.provenance,
+             "observed_at": station.observed_at.isoformat() if station.observed_at else None,
+             "metrics": station.metrics,
+             "affected_entity_ids": station.affected_entity_ids},
         ))
 
     counts: dict[str, int] = {}

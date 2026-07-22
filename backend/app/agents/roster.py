@@ -245,6 +245,7 @@ class EconomicImpactAgent(BaseAgent):
                 f"Brent {s.brent_change_pct:+.1f}% to ${s.brent_projected_usd:.0f}.",
                 f"Diesel to ₹{s.diesel_projected_inr:.1f}/L.",
                 f"Inflation +{s.inflation_bps:.0f} bps; GDP {s.gdp_impact_pct:.2f}%.",
+                f"Power/fuel stress proxy: {s.power_sector_stress_pct:.1f}%.",
             ],
             reasoning=(
                 "Crude price transmits to freight, power and CPI. A sustained "
@@ -265,7 +266,8 @@ class EconomicImpactAgent(BaseAgent):
             ],
             key_metrics={"brent_change_pct": s.brent_change_pct,
                          "inflation_bps": s.inflation_bps,
-                         "gdp_impact_pct": s.gdp_impact_pct},
+                         "gdp_impact_pct": s.gdp_impact_pct,
+                         "power_sector_stress_pct": s.power_sector_stress_pct},
         )
 
 

@@ -18,6 +18,8 @@ import type {
   OntologyImpactResult,
   OntologySearchResult,
   OntologyStats,
+  OntologySchema,
+  OperationalSnapshot,
 } from "@/lib/types";
 
 /** Live fused intelligence feed (events + prices + weather + vessels). */
@@ -43,7 +45,8 @@ export function useScenarios() {
   return useQuery<ScenarioSpec[]>({
     queryKey: ["scenarios"],
     queryFn: () => apiGet<ScenarioSpec[]>("/api/simulation/scenarios"),
-    staleTime: Infinity,
+    staleTime: 20_000,
+    refetchInterval: 30_000,
   });
 }
 
@@ -55,8 +58,9 @@ export function useSimulation(scenarioId: string, levers: ResponseLevers) {
       apiPost<SimulationResult>("/api/simulation/run", {
         scenario_id: scenarioId,
         levers,
-      }),
+    }),
     staleTime: 5_000,
+    refetchInterval: scenarioId === "auto_live" ? 30_000 : false,
   });
 }
 
@@ -108,6 +112,15 @@ export function useOntologyStats() {
   });
 }
 
+/** Versioned ontology classes, relationship rules and provenance contract. */
+export function useOntologySchema() {
+  return useQuery<OntologySchema>({
+    queryKey: ["ontology-schema"],
+    queryFn: () => apiGet<OntologySchema>("/api/ontology/schema"),
+    staleTime: Infinity,
+  });
+}
+
 /** NASA GIBS satellite imagery tile-layer config (keyless). */
 export function useSatelliteLayers() {
   return useQuery<SatelliteLayersResponse>({
@@ -135,6 +148,16 @@ export function useSourceStatus() {
     queryKey: ["source-status"],
     queryFn: () => apiGet("/api/sources/status"),
     refetchInterval: 60_000,
+  });
+}
+
+/** One fused state shared by map, scenario engine, optimizer and council. */
+export function useOperationalSnapshot() {
+  return useQuery<OperationalSnapshot>({
+    queryKey: ["operational-snapshot"],
+    queryFn: () => apiGet<OperationalSnapshot>("/api/operations/snapshot"),
+    refetchInterval: 15_000,
+    staleTime: 10_000,
   });
 }
 
@@ -170,3 +193,12 @@ export function useLatestMission(scenarioId: string) {
   });
 }
 
+
+export function useMissionRecord(missionId: string | null) {
+  return useQuery<MissionRecord>({
+    queryKey: ["mission", missionId],
+    queryFn: () => apiGet<MissionRecord>(`/api/missions/${encodeURIComponent(missionId!)}`),
+    enabled: Boolean(missionId),
+    refetchInterval: 5_000,
+  });
+}

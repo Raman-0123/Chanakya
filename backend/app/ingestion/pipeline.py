@@ -13,6 +13,8 @@ from app.ingestion.models import DomainEvent, Evidence, SignalCategory, SourceKi
 from app.ingestion.service import get_intelligence_service
 from app.ingestion.status import source_status
 from app.ingestion.supplemental import fetch_firms_events, get_ppac_snapshot
+from app.operations import get_operational_service
+from app.operations.coordinator import auto_response_coordinator
 
 log = get_logger("ingestion.pipeline")
 
@@ -50,6 +52,9 @@ class IngestionPipeline:
         await get_repositories().upsert_vessels(feed.vessels)
         await event_bus.publish(accepted)
         await self._update_statuses(feed, supplemental)
+        snapshot = get_operational_service().update(feed)
+        await event_bus.publish_operational(snapshot)
+        auto_response_coordinator.consider(snapshot)
         log.info("ingestion.completed", observed=len(events), accepted=len(accepted))
         return accepted
 

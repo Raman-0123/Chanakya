@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.domain.entities import (
     Coast,
     CrudeGrade,
+    DemandCenter,
     DemandProfile,
     EnergyNetwork,
     GeoPoint,
@@ -243,6 +244,36 @@ def _reserves() -> list[StrategicReserveSite]:
     ]
 
 
+def _demand_centers() -> list[DemandCenter]:
+    """Representative downstream product hubs; shares are versioned assumptions."""
+    return [
+        DemandCenter(id="north", name="North / NCR Fuel Hub", region="north",
+                     coords=GeoPoint(lat=28.61, lon=77.21), demand_share=0.23,
+                     sector_mix={"transport": 0.58, "power": 0.12, "industry": 0.30},
+                     supplying_refinery_ids=["panipat_ref", "mathura_ref", "bathinda_ref"]),
+        DemandCenter(id="west", name="Western Industrial Fuel Hub", region="west",
+                     coords=GeoPoint(lat=19.08, lon=72.88), demand_share=0.24,
+                     sector_mix={"transport": 0.48, "power": 0.10, "industry": 0.42},
+                     supplying_refinery_ids=["jamnagar", "vadinar_ref", "mumbai_ref", "koyali_ref"]),
+        DemandCenter(id="south", name="Southern Fuel Hub", region="south",
+                     coords=GeoPoint(lat=13.08, lon=80.27), demand_share=0.20,
+                     sector_mix={"transport": 0.55, "power": 0.16, "industry": 0.29},
+                     supplying_refinery_ids=["mangalore_ref", "kochi_ref", "chennai_ref"]),
+        DemandCenter(id="east", name="Eastern Industrial Fuel Hub", region="east",
+                     coords=GeoPoint(lat=22.57, lon=88.36), demand_share=0.15,
+                     sector_mix={"transport": 0.44, "power": 0.22, "industry": 0.34},
+                     supplying_refinery_ids=["paradip_ref", "haldia_ref", "barauni_ref"]),
+        DemandCenter(id="central", name="Central India Fuel Hub", region="central",
+                     coords=GeoPoint(lat=23.26, lon=77.41), demand_share=0.10,
+                     sector_mix={"transport": 0.52, "power": 0.18, "industry": 0.30},
+                     supplying_refinery_ids=["bina_ref", "koyali_ref", "mathura_ref"]),
+        DemandCenter(id="northeast", name="Northeast Fuel Hub", region="northeast",
+                     coords=GeoPoint(lat=26.14, lon=91.74), demand_share=0.08,
+                     sector_mix={"transport": 0.50, "power": 0.25, "industry": 0.25},
+                     supplying_refinery_ids=["barauni_ref", "haldia_ref"]),
+    ]
+
+
 def build_energy_network() -> EnergyNetwork:
     """Construct the baseline digital twin of India's energy supply chain."""
     return EnergyNetwork(
@@ -251,6 +282,7 @@ def build_energy_network() -> EnergyNetwork:
         ports=_ports(),
         refineries=_refineries(),
         reserves=_reserves(),
+        demand_centers=_demand_centers(),
         market=MarketState(),
         demand=DemandProfile(refinery_demand_kbpd=4900, import_dependence_pct=88.0),
     )

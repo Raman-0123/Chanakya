@@ -8,6 +8,7 @@ analysis possible: fix the shock, vary the response, compare outcomes.
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -33,6 +34,17 @@ class ScenarioShock(BaseModel):
     ports_offline: list[str] = Field(default_factory=list)
     # baseline Brent shock fraction this scenario type induces at full severity
     market_shock_base: float = 0.0
+    # Composite/live incidents can disrupt more than one corridor at once.  The
+    # original ``corridor_id`` + ``block_fraction`` pair remains supported for
+    # catalog/backwards compatibility.
+    corridor_blocks: dict[str, float] = Field(default_factory=dict)
+    # Fraction of nominal receiving capacity lost at a port (0..1).  A value of
+    # 1 is equivalent to listing the port in ``ports_offline``.
+    port_capacity_loss: dict[str, float] = Field(default_factory=dict)
+    # Per-supplier availability loss inferred from current sanctions or country
+    # risk.  This lets an operational snapshot express partial, not only binary,
+    # supplier disruption.
+    supplier_disruption_fraction: dict[str, float] = Field(default_factory=dict)
 
 
 class ResponseLevers(BaseModel):
@@ -50,6 +62,11 @@ class ScenarioSpec(BaseModel):
     description: str
     shock: ScenarioShock
     default_levers: ResponseLevers = Field(default_factory=ResponseLevers)
+    source: str = "catalog"              # catalog | live | cached | simulated
+    generated_at: datetime | None = None
+    source_event_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=100.0, ge=0, le=100)
+    provenance: dict[str, int] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

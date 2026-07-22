@@ -63,6 +63,57 @@ export function ImpactReadout() {
           </ul>
         </Panel>
       </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <Panel>
+          <PanelHeader eyebrow="Strategic Reserve Optimizer" title="Site Drawdown & Replenishment" />
+          <div className="divide-y divide-line">
+            {sim.spr_drawdown_plan.length ? sim.spr_drawdown_plan.map((site) => (
+              <div key={site.site_id} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3">
+                <div>
+                  <div className="text-xs font-semibold text-ink">{site.site}</div>
+                  <div className="mt-0.5 text-[10px] text-ink-muted">{site.rationale}</div>
+                  <div className="mt-1 font-mono text-[9px] text-ink-dim">Feeds {site.served_refineries.join(" · ")}</div>
+                </div>
+                <div className="text-right font-mono">
+                  <div className="text-sm font-bold text-signal">{site.release_kbpd.toLocaleString()} kbpd</div>
+                  <div className="text-[9px] text-ink-dim">{site.sustainable_days.toFixed(0)}d sustainable · taper {site.taper_day ? `D${site.taper_day}` : "post-horizon"}</div>
+                  <div className="text-[9px] text-nominal">replenish D{site.replenishment_from_day ?? "—"}</div>
+                </div>
+              </div>
+            )) : <div className="p-4 text-xs text-ink-muted">No SPR draw selected for this response.</div>}
+          </div>
+        </Panel>
+
+        <Panel>
+          <PanelHeader eyebrow="Downstream Digital Twin" title="Refinery Run-Rate Projection" />
+          <div className="max-h-64 overflow-y-auto divide-y divide-line">
+            {sim.refinery_projections.slice(0, 8).map((refinery) => (
+              <div key={refinery.refinery_id} className="flex items-center gap-3 px-4 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-medium text-ink">{refinery.refinery}</div>
+                  <div className="font-mono text-[9px] uppercase text-ink-dim">inventory {refinery.inventory_days}d · {refinery.status}</div>
+                </div>
+                <div className="w-28">
+                  <div className="h-1.5 overflow-hidden rounded-full bg-line">
+                    <div className="h-full bg-signal" style={{ width: `${Math.min(100, refinery.utilization_after_pct)}%` }} />
+                  </div>
+                </div>
+                <div className="readout w-20 text-right text-[10px] text-ink">
+                  {refinery.utilization_before_pct.toFixed(0)}→{refinery.utilization_after_pct.toFixed(0)}%
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      {sim.feasibility_warnings.length > 0 && (
+        <Panel className="border-elevated/40 bg-elevated/5 p-3">
+          <div className="label-terminal text-elevated">Feasibility warnings</div>
+          {sim.feasibility_warnings.map((warning) => <div key={warning} className="mt-1 text-xs text-ink-muted">• {warning}</div>)}
+        </Panel>
+      )}
     </div>
   );
 }

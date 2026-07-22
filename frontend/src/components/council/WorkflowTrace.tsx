@@ -17,7 +17,10 @@ export function WorkflowTrace({ steps, runId, consensusConfidence }: WorkflowTra
   const specialists = steps.filter((s) => s.node.startsWith("specialist_"));
   const reconcile = steps.find((s) => s.node === "reconcile");
   const decision = steps.find((s) => s.node === "decision");
-  const totalDuration = steps.reduce((sum, s) => sum + (s.duration_ms || 0), 0);
+  const timestamps = steps.flatMap((step) => [Date.parse(step.started_at), Date.parse(step.completed_at)]).filter(Number.isFinite);
+  const totalDuration = timestamps.length > 1
+    ? Math.max(0, Math.max(...timestamps) - Math.min(...timestamps))
+    : steps.reduce((sum, step) => sum + (step.duration_ms || 0), 0);
 
   return (
     <Panel className="border-signal/30 bg-panel/90 p-4">

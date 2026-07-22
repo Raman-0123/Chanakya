@@ -16,6 +16,7 @@ const OBJECTIVE_LABEL: Record<string, string> = {
   reserve: "Reserve Preservation",
   feasibility: "Operational Feasibility",
   evidence: "Evidence Confidence",
+  council_alignment: "Council Alignment",
 };
 
 export function DecisionRoom() {
@@ -121,6 +122,12 @@ function StrategyCard({
         </div>
 
         <p className="mt-2 text-xs leading-relaxed text-ink-muted">{s.thesis}</p>
+        {s.optimization && (
+          <div className="mt-2 flex items-center justify-between rounded border border-line bg-base/40 px-2 py-1.5 font-mono text-[9px] uppercase text-ink-dim">
+            <span>{s.optimization.method.replaceAll("_", " ")}</span>
+            <span className="text-signal">{s.optimization.candidate_count} candidates</span>
+          </div>
+        )}
         {!s.feasible && (
           <div className="mt-2 flex gap-1.5 rounded border border-critical/30 bg-critical/10 p-2 text-[11px] text-critical">
             <ShieldAlert size={13} className="shrink-0" />
@@ -220,9 +227,9 @@ function ProcurementTable({ strategy }: { strategy: StrategyOption }) {
           {alternatives.filter((item) => item.feasible).length} feasible</div>}
       />
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[900px] border-collapse text-left text-xs">
+        <table className="w-full min-w-[1100px] border-collapse text-left text-xs">
           <thead className="label-terminal border-b border-line bg-base/70">
-            <tr>{["Supplier / grade", "Volume", "Route", "ETA", "Premium", "Refinery fit", "Constraint", "Confidence"].map((label) =>
+            <tr>{["Supplier / grade", "Volume", "Route", "Arrival", "Landed premium", "Tanker / port", "Refinery fit", "Constraint", "Evidence"].map((label) =>
               <th key={label} className="px-3 py-2 font-medium">{label}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -232,13 +239,26 @@ function ProcurementTable({ strategy }: { strategy: StrategyOption }) {
                   <div className="font-mono text-[10px] uppercase text-ink-dim">{item.crude_grade.replaceAll("_", " ")}</div></td>
                 <td className="readout px-3 py-2.5 text-ink">{item.volume_kbpd.toLocaleString()} kbpd</td>
                 <td className="px-3 py-2.5 text-ink-muted">{item.route}</td>
-                <td className="readout px-3 py-2.5 text-ink">T+{item.eta_days}d</td>
-                <td className="readout px-3 py-2.5 text-energy">+${item.estimated_premium_usd_bbl.toFixed(1)}/bbl</td>
+                <td className="readout px-3 py-2.5 text-ink">
+                  <div>T+{item.eta_days}d</div>
+                  <div className={item.arrives_within_horizon ? "text-[9px] text-nominal" : "text-[9px] text-critical"}>{item.arrives_within_horizon ? "within horizon" : "late cargo"}</div>
+                </td>
+                <td className="readout px-3 py-2.5 text-energy">
+                  <div>+${item.landed_premium_usd_bbl.toFixed(1)}/bbl</div>
+                  <div className="text-[9px] text-ink-dim">war risk ${item.war_risk_premium_usd_bbl.toFixed(1)}</div>
+                </td>
+                <td className="px-3 py-2.5 text-ink-muted">
+                  <div>{item.tanker_status}</div>
+                  <div className="font-mono text-[9px]">port +{item.port_congestion_days.toFixed(1)}d · charter +{item.charter_delay_days.toFixed(1)}d</div>
+                </td>
                 <td className="max-w-[190px] px-3 py-2.5 text-ink-muted">{item.compatible_refineries.slice(0, 2).join(", ") || "None"}</td>
                 <td className="max-w-[220px] px-3 py-2.5">
                   <span className={item.feasible ? "text-nominal" : "text-critical"}>{item.capacity_constraint}</span>
                 </td>
-                <td className="readout px-3 py-2.5 text-ink">{item.confidence.toFixed(0)}%</td>
+                <td className="px-3 py-2.5">
+                  <div className="readout text-ink">{item.confidence.toFixed(0)}%</div>
+                  <div className="font-mono text-[9px] uppercase text-ink-dim">{Object.values(item.provenance).join(" · ")}</div>
+                </td>
               </tr>
             ))}
           </tbody>

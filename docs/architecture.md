@@ -11,11 +11,13 @@ GDELT · Open-Meteo · EIA/Alpha Vantage · AISStream/Replay · Sanctions · FIR
                                   │
                    PostgreSQL ← Redis Streams → WebSocket
                                   │
-                         Neo4j operational ontology
+             Fused OperationalSnapshot + geo monitoring stations
                                   │
-                    LangGraph six-specialist council
+          Risk/quality gate ──→ LangGraph six-specialist council
                                   │
-              Daily simulation + procurement decision engine
+       Control search + ETA-aware procurement + site-level SPR plan
+                                  │
+      Neo4j: supplier→route→port→refinery→distribution demand hub
                                   │
                  Next.js six-room mission-control interface
 ```
@@ -24,7 +26,12 @@ GDELT · Open-Meteo · EIA/Alpha Vantage · AISStream/Replay · Sanctions · FIR
 - Redis provides caching, a bounded event stream, retry/dead-letter handling and scheduler leases.
 - Neo4j is the ontology source; `/api/graph` declares its in-memory degraded fallback.
 - Qdrant stores a small cited official-source evidence corpus.
-- Agents consume repository/ontology context, never raw adapter responses.
+- Agents consume the same immutable operational snapshot and simulation context;
+  their typed lever proposals are confidence-weighted into decision scoring.
+- AIS positions are geofenced to monitored routes and count as tankers only when
+  AIS static ship type identifies them; unknown vessels stay explicitly unknown.
+- Mission activation persists the operator-selected strategy, while every agency
+  task transition is PIN-gated and audit-recorded.
 - WebSockets carry invalidation/events; REST remains the recovery and command interface.
 - `PROCESS_ROLE=all|api|worker` supports a one-service hackathon deployment and later separation.
 

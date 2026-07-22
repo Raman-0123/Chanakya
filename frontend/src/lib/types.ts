@@ -59,6 +59,11 @@ export interface Vessel {
   destination: string | null;
   cargo_kbbl: number | null;
   track?: [number, number][];
+  source_kind?: string;
+  imo?: number | null;
+  ship_type_code?: number | null;
+  destination_reported?: string | null;
+  last_seen_at?: string;
 }
 
 // ---- Satellite imagery (NASA GIBS) ----
@@ -114,6 +119,8 @@ export interface CascadeResult {
     isolated_count: number;
     spr_bridge_days: number;
     est_diesel_output_loss_kbpd: number;
+    distribution_hubs_affected?: number;
+    power_linked_demand_at_risk_pct?: number;
   };
   macro_projection: CascadeMacro | null;
   narrative: string;
@@ -199,12 +206,22 @@ export interface ReserveSite {
   fill_pct: number;
   stored_mmt: number;
 }
+export interface DemandCenter {
+  id: string;
+  name: string;
+  region: string;
+  coords: GeoPoint;
+  demand_share: number;
+  sector_mix: Record<string, number>;
+  supplying_refinery_ids: string[];
+}
 export interface NetworkData {
   suppliers: Supplier[];
   corridors: Corridor[];
   ports: Port[];
   refineries: Refinery[];
   reserves: ReserveSite[];
+  demand_centers: DemandCenter[];
   market: { brent_usd: number; inr_usd: number; retail_diesel_inr_per_l: number; retail_petrol_inr_per_l: number };
   demand: { refinery_demand_kbpd: number; import_dependence_pct: number };
   aggregates: {
@@ -230,6 +247,11 @@ export interface ScenarioSpec {
   description: string;
   shock: Record<string, unknown>;
   default_levers: ResponseLevers;
+  source?: "catalog" | "live" | "cached" | "simulated";
+  generated_at?: string | null;
+  source_event_ids?: string[];
+  confidence?: number;
+  provenance?: Record<string, number>;
 }
 export interface ImpactLine {
   label: string;
@@ -263,6 +285,7 @@ export interface SimulationResult {
   petrol_projected_inr: number;
   inflation_bps: number;
   gdp_impact_pct: number;
+  power_sector_stress_pct: number;
   transit_delay_days: number;
   freight_premium_pct: number;
   est_daily_cost_musd: number;
@@ -284,6 +307,31 @@ export interface SimulationResult {
   spr_consumed_mmt: number;
   spr_remaining_mmt: number;
   feasibility_warnings: string[];
+  procurement_plan: ProcurementAlternative[];
+  replacement_arrived_by_horizon_kbpd: number;
+  refinery_projections: {
+    refinery_id: string;
+    refinery: string;
+    utilization_before_pct: number;
+    utilization_after_pct: number;
+    throughput_loss_kbpd: number;
+    inventory_days: number;
+    status: string;
+  }[];
+  spr_drawdown_plan: {
+    site_id: string;
+    site: string;
+    release_kbpd: number;
+    sustainable_days: number;
+    projected_draw_mmt: number;
+    start_day: number;
+    taper_day: number | null;
+    replenishment_from_day: number | null;
+    served_refineries: string[];
+    rationale: string;
+  }[];
+  operational_snapshot_id: string | null;
+  input_provenance: Record<string, number | string>;
 }
 
 // ---- Council / Decision ----
@@ -300,6 +348,10 @@ export interface AgentAssessment {
   evidence: { label: string; detail: string; url?: string | null; publisher?: string | null }[];
   key_metrics: Record<string, number | string>;
   reasoning_mode: "llm" | "grounded";
+  proposed_levers: ResponseLevers | null;
+  llm_provider?: string | null;
+  llm_model?: string | null;
+  llm_latency_ms?: number | null;
 }
 export interface StrategyOption {
   id: string;
@@ -327,6 +379,13 @@ export interface StrategyOption {
   infeasibility_reasons: string[];
   procurement_alternatives: ProcurementAlternative[];
   evidence_chain?: EvidenceCitation[];
+  optimization?: {
+    method: string;
+    candidate_count: number;
+    operational_snapshot_id: string | null;
+    council_target: ResponseLevers;
+    council_alignment: number;
+  };
 }
 export interface ProcurementAlternative {
   supplier_id: string;
@@ -341,6 +400,15 @@ export interface ProcurementAlternative {
   capacity_constraint: string;
   confidence: number;
   feasible: boolean;
+  arrives_within_horizon: boolean;
+  corridor_id: string;
+  port_congestion_days: number;
+  charter_delay_days: number;
+  tanker_status: string;
+  war_risk_premium_usd_bbl: number;
+  landed_premium_usd_bbl: number;
+  logistics_notes: string[];
+  provenance: Record<string, string>;
   evidence: string[];
 }
 export interface CouncilResult {
@@ -357,6 +425,15 @@ export interface CouncilResult {
   mission_id: string | null;
   schema_version: string;
   provenance: Record<string, unknown>;
+  latency?: {
+    context_build_ms: number;
+    graph_execution_ms: number;
+    total_pipeline_ms: number;
+    triggering_signal_at: string | null;
+    signal_age_seconds: number | null;
+    recommendation_at: string;
+    end_to_end_seconds: number;
+  } | null;
 }
 
 export interface MissionRecord extends Record<string, unknown> {
@@ -369,12 +446,88 @@ export interface MissionRecord extends Record<string, unknown> {
   activated_at: string | null;
   strategy?: StrategyOption;
   workflow?: Record<string, unknown> | null;
+  operational_snapshot_id?: string | null;
+  tasks?: MissionTask[];
+}
+
+export interface MissionTask {
+  id: string;
+  sequence: number;
+  action: string;
+  agency: string;
+  priority: string;
+  status: "pending" | "queued" | "acknowledged" | "in_progress" | "blocked" | "completed";
+  acknowledged_at: string | null;
+  completed_at: string | null;
+  note: string | null;
+}
+
+// ---- Live operational snapshot ----
+export interface GeoStation {
+  id: string;
+  kind: "chokepoint" | "weather" | "port" | "refinery" | "reserve";
+  name: string;
+  lat: number;
+  lon: number;
+  status: string;
+  risk_score: number;
+  provenance: string;
+  observed_at: string | null;
+  metrics: Record<string, string | number | null>;
+  affected_entity_ids: string[];
+}
+
+export interface CorridorOperationalState {
+  corridor_id: string;
+  disruption_probability: number;
+  band: string;
+  signal_pressure: number;
+  mean_confidence: number;
+  contributing_events: number;
+  lead_time_hours: number;
+  is_live: boolean;
+  source_kinds: string[];
+  actionable: boolean;
+}
+
+export interface VesselFlowState {
+  corridor_id: string;
+  vessel_count: number;
+  tanker_count: number;
+  moving_tankers: number;
+  average_speed_kn: number;
+  live_count: number;
+  coverage: string;
+}
+
+export interface OperationalSnapshot {
+  id: string;
+  generated_at: string;
+  active_scenario: ScenarioSpec;
+  corridors: CorridorOperationalState[];
+  stations: GeoStation[];
+  vessel_flows: VesselFlowState[];
+  market: {
+    brent_usd: number;
+    change_pct: number;
+    observed_at: string;
+    source: string;
+    provenance: string;
+  };
+  supplier_risk: Record<string, number>;
+  port_capacity_factor: Record<string, number>;
+  evidence_events: Record<string, unknown>[];
+  provenance: Record<string, number>;
+  is_live: boolean;
+  data_quality_score: number;
+  freshness_seconds: number | null;
+  assumptions: string[];
 }
 
 // ---- Knowledge Graph ----
 export interface GraphNode {
   id: string;
-  type: "supplier" | "corridor" | "port" | "refinery" | "reserve" | "event" | "vessel";
+  type: "supplier" | "corridor" | "port" | "refinery" | "reserve" | "demand" | "event" | "vessel";
   label: string;
   position: { x: number; y: number };
   meta: Record<string, unknown>;
@@ -390,6 +543,7 @@ export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
   backend?: "neo4j" | "in_memory";
+  persistent?: boolean;
   degraded?: boolean;
   schema_version?: string;
 }
@@ -427,7 +581,11 @@ export interface OntologyExploreResult {
   center: string;
   depth: number;
   backend: "neo4j" | "in_memory";
+  persistent: boolean;
   degraded: boolean;
+  status?: "ok" | "not_found";
+  runtime?: OntologyRuntime;
+  schema_version?: string;
 }
 export interface OntologyImpactChainStep {
   id: string;
@@ -439,15 +597,30 @@ export interface OntologyImpactResult {
   nodes: OntologyEntity[];
   edges: OntologyRelationship[];
   chain: OntologyImpactChainStep[];
+  paths: OntologyImpactChainStep[][];
+  exposures: {
+    id: string;
+    label: string;
+    import_share?: number | null;
+    relationship: string;
+  }[];
   event_id: string;
   backend: "neo4j" | "in_memory";
+  persistent: boolean;
   degraded: boolean;
+  status?: "ok" | "not_found" | "unresolved";
+  message?: string;
+  runtime?: OntologyRuntime;
+  schema_version?: string;
 }
 export interface OntologySearchResult {
   results: OntologyEntity[];
   query: string;
   backend: "neo4j" | "in_memory";
+  persistent: boolean;
   degraded: boolean;
+  runtime?: OntologyRuntime;
+  schema_version?: string;
 }
 export interface OntologyStats {
   node_counts: Record<string, number>;
@@ -455,7 +628,37 @@ export interface OntologyStats {
   total_nodes: number;
   total_relationships: number;
   backend: "neo4j" | "in_memory";
+  persistent: boolean;
   degraded: boolean;
+  runtime?: OntologyRuntime;
+  schema_version?: string;
+}
+
+export interface OntologyRuntime {
+  baseline_entities: number;
+  observed_entities: number;
+  event_entities: number;
+  vessel_entities: number;
+  generated_at: string;
+}
+
+export interface OntologySchema {
+  schema_version: string;
+  identity: string;
+  node_types: {
+    type: string;
+    label: string;
+    prefix: string;
+    temporal: boolean;
+    required: string[];
+  }[];
+  relationship_types: {
+    type: string;
+    from: string[];
+    to: string[];
+    meaning: string;
+  }[];
+  provenance_policy: Record<string, string>;
 }
 
 // ---- Workflow Trace ----
@@ -477,4 +680,3 @@ export interface EvidenceCitation {
   confidence: number;
   category: string;
 }
-

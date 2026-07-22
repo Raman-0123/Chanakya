@@ -76,6 +76,34 @@ class EventBus:
             "type": "source.status", "source": source, "data": status,
         })
 
+    async def publish_operational(self, snapshot) -> None:
+        await websocket_hub.broadcast({
+            "type": "operations.snapshot",
+            "cursor": snapshot.id,
+            "schema_version": "1.0",
+            "data": {
+                "id": snapshot.id,
+                "generated_at": snapshot.generated_at.isoformat(),
+                "scenario": snapshot.active_scenario.model_dump(mode="json"),
+                "is_live": snapshot.is_live,
+                "data_quality_score": snapshot.data_quality_score,
+            },
+        })
+
+    async def publish_recommendation(self, result, snapshot_id: str) -> None:
+        await websocket_hub.broadcast({
+            "type": "operations.recommendation",
+            "cursor": result.workflow_run_id,
+            "schema_version": result.schema_version,
+            "data": {
+                "snapshot_id": snapshot_id,
+                "workflow_run_id": result.workflow_run_id,
+                "mission_id": result.mission_id,
+                "recommended_strategy_id": result.recommended_strategy_id,
+                "consensus_confidence": result.consensus_confidence,
+            },
+        })
+
 
 websocket_hub = WebSocketHub()
 event_bus = EventBus()

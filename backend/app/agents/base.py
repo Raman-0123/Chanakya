@@ -10,6 +10,7 @@ from app.agents.context import CouncilContext
 from app.core.logging import get_logger
 from app.llm import LLMMessage, Role
 from app.llm.router import get_llm_router
+from app.domain.scenarios import ResponseLevers
 
 log = get_logger("agents")
 
@@ -34,6 +35,10 @@ class AgentAssessment(BaseModel):
     evidence: list[EvidenceItem] = Field(default_factory=list)
     key_metrics: dict[str, float | str] = Field(default_factory=dict)
     reasoning_mode: str = "grounded"  # "llm" | "grounded"
+    proposed_levers: ResponseLevers | None = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    llm_latency_ms: int | None = None
 
 
 class BaseAgent(abc.ABC):
@@ -50,7 +55,9 @@ class BaseAgent(abc.ABC):
                 return self._attach_corpus_evidence(result, ctx)
             except Exception as exc:  # noqa: BLE001
                 log.warning("agent.llm_failed", agent=self.id, error=str(exc))
-        return self._attach_corpus_evidence(self.reason(ctx), ctx)
+        result = self.reason(ctx)
+        result.proposed_levers = result.proposed_levers or self._grounded_proposal(ctx)
+        return self._attach_corpus_evidence(result, ctx)
 
     @staticmethod
     def _attach_corpus_evidence(result: AgentAssessment,
@@ -69,7 +76,9 @@ class BaseAgent(abc.ABC):
             "Respond as STRICT JSON with keys: stance (string, <=12 words), "
             "observations (array of 2-4 short strings), reasoning (string, 2-3 "
             "sentences), recommendation (string, 1-2 sentences), concerns (array "
-            "of 1-3 short strings), confidence (number 0-100). Ground every claim "
+            "of 1-3 short strings), confidence (number 0-100), spr_release_pct "
+            "(number 0-100), enable_reroute (boolean), enable_spot (boolean). "
+            "Ground every claim "
             "in the numbers above. Do not invent figures."
         )
         data = await router.complete_json(
@@ -81,6 +90,16 @@ class BaseAgent(abc.ABC):
             max_tokens=700,
         )
         base = self.reason(ctx)  # grounded evidence + metrics as the backbone
+        fallback_levers = base.proposed_levers or self._grounded_proposal(ctx)
+        try:
+            proposed = ResponseLevers(
+                spr_release_pct=data.get("spr_release_pct", fallback_levers.spr_release_pct),
+                enable_reroute=data.get("enable_reroute", fallback_levers.enable_reroute),
+                enable_spot=data.get("enable_spot", fallback_levers.enable_spot),
+            )
+        except Exception:  # malformed LLM control values never escape validation
+            proposed = fallback_levers
+        meta = data.get("_llm_meta", {})
         return AgentAssessment(
             agent_id=self.id, agent_name=self.name, role=self.role,
             stance=str(data.get("stance", base.stance))[:120],
@@ -92,6 +111,37 @@ class BaseAgent(abc.ABC):
             evidence=base.evidence,
             key_metrics=base.key_metrics,
             reasoning_mode="llm",
+            proposed_levers=proposed,
+            llm_provider=meta.get("provider"), llm_model=meta.get("model"),
+            llm_latency_ms=meta.get("latency_ms"),
+        )
+
+    def _grounded_proposal(self, ctx: CouncilContext) -> ResponseLevers:
+        """Typed action proposal consumed by the optimization node.
+
+        This is also the safe fallback when an LLM provider is unavailable or
+        emits invalid control values.
+        """
+        sim = ctx.sim
+        residual_pct = min(100.0, 100 * sim.residual_shortfall_kbpd / 900.0)
+        if self.id == "reserve":
+            spr = max(10.0, min(100.0, residual_pct + 20))
+        elif self.id == "economic":
+            spr = 55.0 if sim.brent_change_pct >= 15 else 25.0
+        elif self.id == "intelligence":
+            threat = ctx.intel_summary.get("threat_level", "nominal")
+            spr = {"critical": 55.0, "high": 45.0,
+                   "elevated": 25.0}.get(threat, 10.0)
+        elif self.id == "procurement":
+            spr = 35.0 if sim.residual_shortfall_kbpd > 0 else 15.0
+        elif self.id == "maritime":
+            spr = 25.0
+        else:
+            spr = 45.0 if sim.residual_shortfall_kbpd > 0 else 20.0
+        return ResponseLevers(
+            spr_release_pct=spr,
+            enable_reroute=sim.rerouted_kbpd > 0 or sim.supply_gap_kbpd > 0,
+            enable_spot=sim.residual_shortfall_kbpd > 0 or self.id in {"procurement", "policy"},
         )
 
     @abc.abstractmethod

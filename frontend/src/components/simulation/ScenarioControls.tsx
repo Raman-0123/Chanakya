@@ -3,6 +3,7 @@
 import { useScenarios } from "@/hooks/useChanakya";
 import { useMission } from "@/stores/useMission";
 import { Panel, PanelHeader } from "@/components/primitives";
+import { SourceTag } from "@/components/primitives/SourceTag";
 import { cn } from "@/lib/utils";
 
 const CATEGORY_COLOR: Record<string, string> = {
@@ -40,7 +41,14 @@ export function ScenarioControls() {
                   style={{ backgroundColor: CATEGORY_COLOR[s.category] ?? "#8b99b3" }}
                 />
                 <span className="text-sm font-medium text-ink">{s.name}</span>
+                {s.source && <SourceTag kind={s.source === "catalog" ? "simulated" : s.source} />}
               </div>
+              {s.id === "auto_live" && (
+                <div className="mt-1 flex gap-2 font-mono text-[9px] uppercase text-ink-dim">
+                  <span>confidence {s.confidence?.toFixed(0) ?? "—"}%</span>
+                  <span>{s.source_event_ids?.length ?? 0} source events</span>
+                </div>
+              )}
               <p className="mt-1 line-clamp-2 text-xs text-ink-muted">{s.description}</p>
             </button>
           ))}

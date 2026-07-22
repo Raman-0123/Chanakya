@@ -8,6 +8,9 @@ const META: Record<string, { label: string; color: string }> = {
   unavailable: { label: "N/A", color: "#ef4444" },
   llm: { label: "LLM", color: "#6366f1" },
   grounded: { label: "GROUNDED", color: "#22d3ee" },
+  local_graph: { label: "LOCAL GRAPH", color: "#f59e0b" },
+  neo4j: { label: "NEO4J", color: "#10b981" },
+  baseline_model: { label: "MODEL", color: "#8b99b3" },
 };
 
 /** Provenance badge — the platform is always honest about where data came from. */

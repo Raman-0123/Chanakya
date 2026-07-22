@@ -20,6 +20,7 @@ class CouncilContext(BaseModel):
     intel_summary: dict
     top_events: list[dict]           # compact event dicts (title, severity, corridors)
     retrieved_evidence: list[dict] = Field(default_factory=list)
+    operational_snapshot: dict = Field(default_factory=dict)
 
     def brief(self) -> str:
         """Compact, factual brief handed to each agent's LLM prompt."""
@@ -34,6 +35,18 @@ class CouncilContext(BaseModel):
             f"({item.get('url', '')})"
             for item in self.retrieved_evidence[:4]
         )
+        cargoes = "\n".join(
+            f"  - {item.supplier}: {item.volume_kbpd:,.0f} kbpd via {item.route}; "
+            f"ETA {item.eta_days}d; {'within horizon' if item.arrives_within_horizon else 'late'}; "
+            f"landed +${item.landed_premium_usd_bbl:.1f}/bbl; tanker {item.tanker_status}"
+            for item in s.procurement_plan if item.feasible
+        )
+        reserve_sites = "\n".join(
+            f"  - {site.site}: {site.release_kbpd:,.0f} kbpd; "
+            f"taper day {site.taper_day or 'post-horizon'}; replenish from day "
+            f"{site.replenishment_from_day or 'unresolved'}"
+            for site in s.spr_drawdown_plan
+        )
         return f"""SCENARIO: {self.scenario_name}
 {self.scenario_description}
 
@@ -47,12 +60,22 @@ SIMULATION (deterministic domain engine):
 - Stressed refineries: {', '.join(s.stressed_refineries) or 'none'}
 - Brent: ${s.brent_projected_usd:.0f} ({s.brent_change_pct:+.1f}%) | Diesel: ₹{s.diesel_projected_inr:.1f}/L
 - Inflation: {s.inflation_bps:.0f} bps | GDP impact: {s.gdp_impact_pct:.2f}%
+- Power/fuel stress proxy: {s.power_sector_stress_pct:.1f}%
 - Transit delay: {s.transit_delay_days:.0f} days | Freight premium: {s.freight_premium_pct:.0f}%
 - Security Index (NESI): {s.nesi_before:.0f} -> {s.nesi_after.value:.0f} ({s.nesi_after.band})
 
 INTELLIGENCE FEED: threat={self.intel_summary.get('threat_level')}, \
 events={self.intel_summary.get('event_count')}, \
 corridors flagged={self.intel_summary.get('corridors_flagged')}
+OPERATIONAL SNAPSHOT: id={self.operational_snapshot.get('id')}, \
+live={self.operational_snapshot.get('is_live')}, \
+data quality={self.operational_snapshot.get('data_quality_score')}, \
+Brent=${self.operational_snapshot.get('brent_usd')}, \
+provenance={self.operational_snapshot.get('provenance')}
+EXECUTABLE PROCUREMENT OPTIONS:
+{cargoes or '  - No feasible replacement option.'}
+SITE-LEVEL SPR SCHEDULE:
+{reserve_sites or '  - No SPR draw in this run.'}
 TOP EVENTS:
 {events}
 AUTHORITATIVE EVIDENCE:

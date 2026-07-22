@@ -55,7 +55,24 @@ export interface SystemHealth {
   version: string;
   environment: string;
   datastores: Record<string, boolean>;
-  llm: { available: boolean; providers: string[] };
+  llm: {
+    available: boolean;
+    configured?: boolean;
+    runtime_verified?: boolean;
+    providers: string[];
+    verified_providers?: string[];
+    runtime?: Record<string, {
+      configured: boolean;
+      verified: boolean;
+      successes: number;
+      failures: number;
+      last_success_at: string | null;
+      last_failure_at: string | null;
+      last_error: string | null;
+      last_model: string | null;
+      last_latency_ms: number | null;
+    }>;
+  };
   data_sources: Record<string, boolean>;
   process_role?: string;
   websocket_clients?: number;

@@ -26,6 +26,7 @@ async def get_network() -> dict:
         "reserves": [
             {**r.model_dump(), "stored_mmt": r.stored_mmt} for r in net.reserves
         ],
+        "demand_centers": [center.model_dump() for center in net.demand_centers],
         "market": net.market.model_dump(),
         "demand": net.demand.model_dump(),
         "aggregates": {

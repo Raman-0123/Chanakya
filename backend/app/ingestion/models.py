@@ -160,7 +160,9 @@ class WeatherObs(BaseModel):
 class Vessel(BaseModel):
     id: str
     name: str
-    kind: str = "crude_tanker"
+    # Never assume an arbitrary AIS position report is a crude tanker.  Live
+    # records stay ``unknown`` until AIS static data identifies their ship type.
+    kind: str = "unknown"
     lat: float
     lon: float
     heading: float = 0.0
@@ -169,6 +171,10 @@ class Vessel(BaseModel):
     origin: str | None = None
     destination: str | None = None
     cargo_kbbl: float | None = None
+    imo: int | None = None
+    ship_type_code: int | None = None
+    destination_reported: str | None = None
+    last_seen_at: datetime = Field(default_factory=_now)
     # recent breadcrumb track as [lat, lon] points, oldest→newest (for map trails)
     track: list[list[float]] = Field(default_factory=list)
     source_kind: SourceKind = SourceKind.FALLBACK

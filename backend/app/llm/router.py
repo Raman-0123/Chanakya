@@ -8,6 +8,7 @@ resilience layer that keeps the six-agent council alive across free-tier limits.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Literal
 
@@ -31,6 +32,20 @@ class LLMRouter:
             provider = build_provider(name)
             if provider and provider.is_configured:
                 self._providers.append(provider)
+        self._runtime: dict[str, dict] = {
+            provider.name: {
+                "configured": True,
+                "verified": False,
+                "successes": 0,
+                "failures": 0,
+                "last_success_at": None,
+                "last_failure_at": None,
+                "last_error": None,
+                "last_model": None,
+                "last_latency_ms": None,
+            }
+            for provider in self._providers
+        }
 
     @property
     def available(self) -> bool:
@@ -39,6 +54,15 @@ class LLMRouter:
     @property
     def provider_names(self) -> list[str]:
         return [p.name for p in self._providers]
+
+    @property
+    def runtime_verified(self) -> bool:
+        """True only after this process has received a successful model response."""
+        return any(status["verified"] for status in self._runtime.values())
+
+    @property
+    def runtime_status(self) -> dict[str, dict]:
+        return {name: dict(status) for name, status in self._runtime.items()}
 
     async def complete(
         self,
@@ -68,9 +92,24 @@ class LLMRouter:
                         provider=provider.name,
                         skipped=errors,
                     )
+                status = self._runtime[provider.name]
+                status.update({
+                    "verified": True,
+                    "successes": int(status["successes"]) + 1,
+                    "last_success_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error": None,
+                    "last_model": resp.model,
+                    "last_latency_ms": resp.latency_ms,
+                })
                 return resp
             except LLMProviderError as exc:
                 errors.append(provider.name)
+                status = self._runtime[provider.name]
+                status.update({
+                    "failures": int(status["failures"]) + 1,
+                    "last_failure_at": datetime.now(timezone.utc).isoformat(),
+                    "last_error": str(exc)[:240],
+                })
                 log.warning("llm.provider_failed", provider=provider.name, error=str(exc))
 
         raise NoProviderAvailableError(
@@ -91,7 +130,15 @@ class LLMRouter:
             max_tokens=max_tokens,
             response_format="json",
         )
-        return _parse_json(resp.content)
+        data = _parse_json(resp.content)
+        data["_llm_meta"] = {
+            "provider": resp.provider,
+            "model": resp.model,
+            "latency_ms": resp.latency_ms,
+            "tokens_in": resp.tokens_in,
+            "tokens_out": resp.tokens_out,
+        }
+        return data
 
 
 def _parse_json(text: str) -> dict:

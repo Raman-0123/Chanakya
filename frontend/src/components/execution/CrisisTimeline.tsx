@@ -5,7 +5,7 @@ import {
   Radar, ShieldAlert, Globe2, Activity, Users, FlaskConical,
   Brain, CheckCircle2, Rocket, Repeat,
 } from "lucide-react";
-import { useCouncil, useSimulation } from "@/hooks/useChanakya";
+import { useCouncil, useMissionRecord, useSimulation } from "@/hooks/useChanakya";
 import { useMission } from "@/stores/useMission";
 import { Panel, PanelHeader } from "@/components/primitives";
 import { cn } from "@/lib/utils";
@@ -19,24 +19,38 @@ interface Stage {
 }
 
 export function CrisisTimeline() {
-  const { scenarioId, levers, activated } = useMission();
+  const { scenarioId, levers, activated, selectedStrategyId } = useMission();
   const { data: sim } = useSimulation(scenarioId, levers);
   const { data: council } = useCouncil(scenarioId, levers);
+  const { data: mission } = useMissionRecord(council?.mission_id ?? null);
 
   if (!sim || !council) return null;
 
-  const rec = council.strategies.find((s) => s.id === council.recommended_strategy_id);
+  const rec = mission?.strategy ?? council.strategies.find(
+    (s) => s.id === (selectedStrategyId ?? council.recommended_strategy_id),
+  );
+  const trace = council.workflow_trace ?? [];
+  const traceStart = Math.min(...trace.map((step) => Date.parse(step.started_at)).filter(Number.isFinite));
+  const elapsedAt = (node: string) => {
+    const step = trace.find((item) => item.node === node);
+    if (!step || !Number.isFinite(traceStart)) return "—";
+    return `+${Math.max(0, Date.parse(step.completed_at) - traceStart)}ms`;
+  };
+  const signalAge = council.latency?.signal_age_seconds;
+  const missionActive = activated || mission?.status === "active" || mission?.status === "completed";
+  const completedTasks = mission?.tasks?.filter((task) => task.status === "completed").length ?? 0;
+  const totalTasks = mission?.tasks?.length ?? rec?.implementation_steps.length ?? 0;
   const stages: Stage[] = [
-    { icon: Radar, title: "Geopolitical event detected", detail: council.scenario_name, t: "T+0m", done: true },
-    { icon: ShieldAlert, title: "Threat validated", detail: `Council convened · consensus ${council.consensus_confidence}%`, t: "T+2m", done: true },
-    { icon: Globe2, title: "Digital twin updated", detail: `${sim.stressed_refineries.length || "no"} refineries flagged`, t: "T+3m", done: true },
-    { icon: Activity, title: "AI risk assessment", detail: `Security Index ${sim.nesi_before.toFixed(0)} → ${sim.nesi_after.value.toFixed(0)}`, t: "T+4m", done: true },
-    { icon: Users, title: "Intelligence council reasoned", detail: `${council.assessments.length} agents · ${council.disagreements.length} disagreement(s)`, t: "T+6m", done: true },
-    { icon: FlaskConical, title: "Scenario simulation completed", detail: `Residual ${sim.residual_shortfall_kbpd.toLocaleString()} kbpd · Brent ${sim.brent_change_pct >= 0 ? "+" : ""}${sim.brent_change_pct.toFixed(0)}%`, t: "T+8m", done: true },
-    { icon: Brain, title: "Recommendation generated", detail: rec ? `${rec.title} (score ${rec.score.toFixed(0)})` : "—", t: "T+9m", done: true },
-    { icon: CheckCircle2, title: "Mission approved", detail: activated ? "Cabinet authorisation granted" : "Awaiting approval", t: "T+12m", done: activated },
-    { icon: Rocket, title: "Execution started", detail: activated ? "Playbook dispatched to agencies" : "Pending", t: "T+13m", done: activated },
-    { icon: Repeat, title: "Continuous monitoring", detail: activated ? "Live tracking active" : "Standby", t: "ongoing", done: activated },
+    { icon: Radar, title: "Signal observed", detail: council.latency?.triggering_signal_at ? `${council.scenario_name} · source timestamp retained` : `${council.scenario_name} · no source timestamp`, t: signalAge == null ? "OBS —" : `OBS -${formatDuration(signalAge * 1000)}`, done: true },
+    { icon: ShieldAlert, title: "Operational state fused", detail: `Snapshot ${sim.operational_snapshot_id?.slice(-8) ?? "—"} · ${String(sim.input_provenance.live ?? 0)} live inputs`, t: `+${council.latency?.context_build_ms ?? 0}ms`, done: true },
+    { icon: Globe2, title: "Digital twin updated", detail: `${sim.stressed_refineries.length || "no"} refineries flagged`, t: elapsedAt("chief"), done: true },
+    { icon: Activity, title: "AI risk assessment", detail: `Security Index ${sim.nesi_before.toFixed(0)} → ${sim.nesi_after.value.toFixed(0)}`, t: elapsedAt("specialist_intelligence"), done: true },
+    { icon: Users, title: "Council agents completed", detail: `${council.assessments.length} agents · ${council.disagreements.length} measured disagreement(s)`, t: `${council.latency?.graph_execution_ms ?? 0}ms graph`, done: true },
+    { icon: FlaskConical, title: "Scenario optimization completed", detail: `${rec?.optimization?.candidate_count ?? 0} control plans · residual ${sim.residual_shortfall_kbpd.toLocaleString()} kbpd`, t: elapsedAt("decision"), done: true },
+    { icon: Brain, title: "Recommendation generated", detail: rec ? `${rec.title} (score ${rec.score.toFixed(0)})` : "—", t: `${council.latency?.total_pipeline_ms ?? 0}ms`, done: true },
+    { icon: CheckCircle2, title: "Mission approved", detail: missionActive ? `Operator authorised ${mission?.activated_at ? new Date(mission.activated_at).toLocaleTimeString() : ""}` : "Awaiting operator PIN", t: mission?.activated_at ? new Date(mission.activated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "pending", done: missionActive },
+    { icon: Rocket, title: "Execution tracked", detail: missionActive ? `${completedTasks}/${totalTasks} agency tasks completed` : "Not dispatched", t: missionActive ? mission?.status.toUpperCase() ?? "ACTIVE" : "pending", done: missionActive },
+    { icon: Repeat, title: "Continuous monitoring", detail: missionActive ? "Operational snapshot refresh active" : "Standby", t: "15s refresh", done: missionActive },
   ];
 
   return (
@@ -80,4 +94,11 @@ export function CrisisTimeline() {
       </div>
     </div>
   );
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1_000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${Math.round(ms / 1_000)}s`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+  return `${(ms / 3_600_000).toFixed(1)}h`;
 }

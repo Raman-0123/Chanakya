@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, ExternalLink, Radio, TrendingUp, TrendingDown, Wind } from "lucide-react";
-import { useIntelFeed, useSourceStatus } from "@/hooks/useChanakya";
+import { useIntelFeed, useOperationalSnapshot, useSourceStatus } from "@/hooks/useChanakya";
 import { Panel, PanelHeader, SeverityTag, ConfidenceBar } from "@/components/primitives";
 import { SourceTag } from "@/components/primitives/SourceTag";
 import { StatusLight } from "@/components/primitives/StatusLight";
@@ -13,6 +13,7 @@ import { cn, fmtUsd } from "@/lib/utils";
 export function IntelligenceRoom() {
   const { data, isLoading, isError } = useIntelFeed();
   const { data: sourceData } = useSourceStatus();
+  const { data: operational } = useOperationalSnapshot();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const events = data?.events ?? [];
@@ -23,6 +24,27 @@ export function IntelligenceRoom() {
       {/* Threat summary strip */}
       <ThreatStrip data={data} loading={isLoading} error={isError} />
       <SourceStatusRail sources={sourceData?.sources ?? []} />
+      {operational && (
+        <div className="grid grid-cols-2 gap-2 rounded-md border border-line bg-base/70 px-3 py-2 md:grid-cols-4">
+          {[...operational.corridors]
+            .sort((a, b) => b.disruption_probability - a.disruption_probability)
+            .map((corridor) => (
+              <div key={corridor.corridor_id} className="rounded border border-line bg-panel/60 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-mono text-[10px] uppercase text-ink-muted">{corridor.corridor_id.replace("_", " ")}</span>
+                  <SourceTag kind={corridor.is_live ? "live" : corridor.source_kinds[0] ?? "unavailable"} />
+                </div>
+                <div className="mt-1 flex items-end justify-between">
+                  <span className="readout text-lg font-bold text-ink">{corridor.disruption_probability.toFixed(1)}%</span>
+                  <span className="font-mono text-[9px] uppercase text-ink-dim">lead {corridor.lead_time_hours.toFixed(1)}h</span>
+                </div>
+                <div className="mt-1 h-1 overflow-hidden rounded-full bg-line">
+                  <div className="h-full bg-signal" style={{ width: `${corridor.disruption_probability}%` }} />
+                </div>
+              </div>
+            ))}
+        </div>
+      )}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[1.4fr_1fr]">
         {/* Event stream */}

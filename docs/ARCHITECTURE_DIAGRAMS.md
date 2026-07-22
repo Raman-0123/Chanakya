@@ -16,13 +16,17 @@ sequenceDiagram
   S->>I: News, weather, market, AIS, sanctions, satellite
   I->>I: Normalize, deduplicate, stamp provenance
   I->>R: DomainEvent v1
-  R->>T: Update corridor/supplier/entity exposure
+  R->>T: Publish one OperationalSnapshot
   R->>O: Live risk feed and lead-time signal
-  O->>X: Select scenario and response levers
+  alt qualified incident crosses threshold
+    R->>C: Auto-convene with exact snapshot
+  else operator what-if
+    O->>X: Select scenario and response levers
+  end
   X->>X: Cascade supply, refinery, market and reserve impacts
   X->>C: Shared simulation context and cited evidence
-  C->>D: Six specialist assessments and disagreements
-  D->>D: Re-simulate and rank feasible strategies
+  C->>D: Six typed lever proposals + disagreements
+  D->>D: Search controls; re-simulate every candidate
   D->>O: Recommendation, alternatives, trade-offs, mission
   O->>D: Approve/activate with operator control
 ```
@@ -35,10 +39,10 @@ flowchart TD
   L --> E[Run deterministic engine]
   E --> G[Calculate supply gap and cascade]
   G --> P[Build feasible procurement alternatives]
-  P --> C{Constraints satisfied?}
+  P --> C{Route, ETA, grade, tanker and port constraints satisfied?}
   C -- no --> F[Explain infeasibility]
   C -- yes --> O[Score continuity, resilience, affordability, reserve, feasibility, evidence]
-  O --> R[Rank three strategies]
+  O --> R[Rank three materially distinct strategies]
   R --> A[Operator approval]
   A --> M[Persistent mission]
   M --> Q[Monitor new signals]
@@ -56,6 +60,7 @@ flowchart LR
   U[UNAVAILABLE] --> N
   N --> V[Visible provenance badge]
   N --> A[Auditable model input]
+  S -. never auto-triggers .-> A
   A --> W[Recommendation with evidence]
 ```
 

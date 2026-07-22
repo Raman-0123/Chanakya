@@ -125,6 +125,63 @@ def _refinery_impacts_from_port(
     return impacts, hops
 
 
+def _allocate_refinery_loss(
+    refineries: list, total_short_kbpd: float, relation: str,
+) -> list[CascadeImpact]:
+    throughput = sum(refinery.throughput_kbpd for refinery in refineries) or 1.0
+    impacts: list[CascadeImpact] = []
+    for refinery in refineries:
+        short = min(refinery.throughput_kbpd,
+                    total_short_kbpd * refinery.throughput_kbpd / throughput)
+        after = 100 * max(0.0, refinery.throughput_kbpd - short) / refinery.nameplate_kbpd
+        lost_fraction = short / refinery.throughput_kbpd if refinery.throughput_kbpd else 0
+        impacts.append(CascadeImpact(
+            id=f"refinery:{refinery.id}", type="refinery", label=refinery.name,
+            relation=relation, crude_short_kbpd=round(short, 1),
+            utilization_before=refinery.utilization,
+            utilization_after=round(after, 1),
+            status=_status_from_util(after, lost_fraction), isolated=after <= 5,
+            note=f"Allocated flow loss {short:,.0f} kbpd; utilisation falls to {after:.0f}%.",
+        ))
+    return impacts
+
+
+def _distribution_impacts(
+    net: EnergyNetwork, refinery_impacts: list[CascadeImpact],
+) -> tuple[list[CascadeImpact], list[CascadeHop]]:
+    by_refinery = {item.id.split(":", 1)[-1]: item for item in refinery_impacts}
+    impacts: list[CascadeImpact] = []
+    hops: list[CascadeHop] = []
+    for center in net.demand_centers:
+        linked = [by_refinery[refinery_id] for refinery_id in center.supplying_refinery_ids
+                  if refinery_id in by_refinery]
+        if not linked:
+            continue
+        linked_capacity = sum(
+            next(refinery.throughput_kbpd for refinery in net.refineries
+                 if refinery.id == item.id.split(":", 1)[-1])
+            for item in linked
+        ) or 1.0
+        product_loss = sum(item.crude_short_kbpd for item in linked)
+        loss_fraction = min(1.0, product_loss / linked_capacity)
+        status = ("critical" if loss_fraction >= 0.35 else
+                  "strained" if loss_fraction >= 0.15 else "elevated")
+        impacts.append(CascadeImpact(
+            id=f"demand:{center.id}", type="distribution", label=center.name,
+            relation="receives products from affected refineries",
+            crude_short_kbpd=round(product_loss, 1), status=status,
+            isolated=loss_fraction >= 0.95,
+            note=(f"Estimated product-flow exposure {loss_fraction:.0%}; "
+                  f"power-linked demand share {center.sector_mix.get('power', 0):.0%}."),
+        ))
+        for item in linked:
+            hops.append(CascadeHop(
+                source=item.id, target=f"demand:{center.id}",
+                relation="DISTRIBUTES_TO", magnitude_kbpd=item.crude_short_kbpd,
+            ))
+    return impacts, hops
+
+
 def propagate_cascade(
     net: EnergyNetwork, node_id: str, block_fraction: float = 1.0
 ) -> CascadeResult:
@@ -169,6 +226,18 @@ def propagate_cascade(
         for port in served_ports:
             hops.append(CascadeHop(source=f"corridor:{entity.id}", target=f"port:{port.id}",
                                    relation="ARRIVES_AT", magnitude_kbpd=round(corridor_short / max(1, len(served_ports)), 1)))
+        served_ids = {port.id for port in served_ports}
+        downstream = [refinery for refinery in net.refineries
+                      if served_ids.intersection(refinery.port_ids)]
+        allocated = _allocate_refinery_loss(
+            downstream, corridor_short, "downstream of disrupted corridor",
+        )
+        impacts.extend(allocated)
+        for item in allocated:
+            hops.append(CascadeHop(
+                source=f"corridor:{entity.id}", target=item.id,
+                relation="CONSTRAINS", magnitude_kbpd=item.crude_short_kbpd,
+            ))
         macro_shock = ScenarioShock(corridor_id=entity.id, block_fraction=block_fraction,
                                     duration_days=14, market_shock_base=0.12)
 
@@ -181,14 +250,21 @@ def propagate_cascade(
             status="critical" if block_fraction >= 0.6 else "strained",
             note=f"{short_total:,.0f} kbpd ({entity.import_share:.0%} of imports) removed.",
         ))
-        # grade-compatible refineries carry the substitution burden
-        for ref in net.refineries:
-            compatible = (ref.preferred_grade == entity.grade
-                          or entity.grade.value == "medium_sour"
-                          or ref.preferred_grade.value == "medium_sour")
-            if compatible:
-                hops.append(CascadeHop(source=f"supplier:{entity.id}", target=f"refinery:{ref.id}",
-                                       relation="SUPPLIES", magnitude_kbpd=short_total))
+        compatible_refineries = [
+            ref for ref in net.refineries
+            if (ref.preferred_grade == entity.grade
+                or entity.grade.value == "medium_sour"
+                or ref.preferred_grade.value == "medium_sour")
+        ]
+        allocated = _allocate_refinery_loss(
+            compatible_refineries, short_total, "grade-compatible supplier loss",
+        )
+        impacts.extend(allocated)
+        for item in allocated:
+            hops.append(CascadeHop(
+                source=f"supplier:{entity.id}", target=item.id,
+                relation="SUPPLIES", magnitude_kbpd=item.crude_short_kbpd,
+            ))
         macro_shock = ScenarioShock(sanctioned_supplier_ids=[entity.id], duration_days=30,
                                     market_shock_base=0.07)
 
@@ -202,6 +278,11 @@ def propagate_cascade(
             status=_status_from_util(util_after, block_fraction), isolated=util_after <= 5,
             note=f"Processing down {lost:,.0f} kbpd; fuel output falls proportionally.",
         ))
+
+    refinery_impacts = [item for item in impacts if item.type == "refinery"]
+    demand_impacts, demand_hops = _distribution_impacts(net, refinery_impacts)
+    impacts.extend(demand_impacts)
+    hops.extend(demand_hops)
 
     isolated = [i.id for i in impacts if i.isolated]
     total_short = round(sum(i.crude_short_kbpd for i in impacts if i.type in ("refinery",)) or
@@ -218,6 +299,12 @@ def propagate_cascade(
         "spr_bridge_days": _spr_bridge_days(net, total_short),
         # ~diesel is roughly 38% of refinery output in India's slate
         "est_diesel_output_loss_kbpd": round(total_short * 0.38, 1),
+        "distribution_hubs_affected": len(demand_impacts),
+        "power_linked_demand_at_risk_pct": round(sum(
+            center.demand_share * center.sector_mix.get("power", 0) * 100
+            for center in net.demand_centers
+            if f"demand:{center.id}" in {item.id for item in demand_impacts}
+        ), 1),
     }
 
     macro = None

@@ -19,6 +19,7 @@ from app.domain.scenarios import (
     ScenarioCategory,
     get_scenario,
 )
+from app.operations import get_operational_service
 
 router = APIRouter(prefix="/simulation", tags=["simulation"])
 
@@ -43,7 +44,10 @@ class CustomRunRequest(BaseModel):
 @router.get("/scenarios")
 async def list_scenarios() -> list[dict]:
     """Catalog of triggerable / explorable crises."""
-    return [s.model_dump() for s in SCENARIO_CATALOG]
+    snapshot = await get_operational_service().current()
+    return [snapshot.active_scenario.model_dump(mode="json")] + [
+        s.model_dump(mode="json") for s in SCENARIO_CATALOG
+    ]
 
 
 @router.get("/assumptions")
@@ -58,10 +62,12 @@ async def model_assumptions() -> dict:
 
 @router.post("/run")
 async def run_scenario(req: RunRequest) -> dict:
-    spec = get_scenario(req.scenario_id)
+    operational = await get_operational_service().current()
+    spec = (operational.active_scenario if req.scenario_id == "auto_live"
+            else get_scenario(req.scenario_id))
     if not spec:
         raise HTTPException(404, f"Unknown scenario '{req.scenario_id}'")
-    result = _engine.run(spec, req.levers)
+    result = _engine.run(spec, req.levers, operational)
     return result.model_dump()
 
 
@@ -75,4 +81,5 @@ async def run_custom(req: CustomRunRequest) -> dict:
         shock=req.shock,
         default_levers=req.levers or ResponseLevers(),
     )
-    return _engine.run(spec, req.levers).model_dump()
+    operational = await get_operational_service().current()
+    return _engine.run(spec, req.levers, operational).model_dump()

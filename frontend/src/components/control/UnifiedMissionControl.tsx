@@ -1,17 +1,17 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
-  Radar, Globe2, Share2, Users, Brain, Rocket, Crosshair, Minimize2, Maximize2, Search, Sliders, Play, Layers, X, Zap
+  Radar, Rocket, Minimize2, Maximize2, Sliders, Layers, X, Zap, Radio, DatabaseZap
 } from "lucide-react";
 import {
-  useIntelFeed, useNetwork, useScenarios, useSimulation, useCouncil, useSourceStatus, useSatelliteLayers
+  useIntelFeed, useNetwork, useScenarios, useSimulation, useCouncil, useSourceStatus,
+  useSatelliteLayers, useOperationalSnapshot, useMissionRecord,
 } from "@/hooks/useChanakya";
 import { useMission } from "@/stores/useMission";
 import { useSecurityIndex } from "@/stores/useSecurityIndex";
-import { MetricReadout, Panel } from "@/components/primitives";
 import { SourceTag } from "@/components/primitives/SourceTag";
 import type { MapMode, TwinSelection } from "@/components/twin/EnergyMap";
 import { cn } from "@/lib/utils";
@@ -21,8 +21,8 @@ import { apiPostOperator } from "@/lib/api";
 import { GraphView } from "@/components/twin/GraphView";
 import { LayerSwitcher } from "@/components/twin/LayerSwitcher";
 import { CascadePanel } from "@/components/twin/CascadePanel";
-import { WorkflowTrace } from "@/components/council/WorkflowTrace";
 import { CrisisTimeline } from "@/components/execution/CrisisTimeline";
+import { useQueryClient } from "@tanstack/react-query";
 
 const EnergyMap = dynamic(() => import("@/components/twin/EnergyMap"), {
   ssr: false,
@@ -39,10 +39,10 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export function UnifiedMissionControl() {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const pathname = usePathname();
   const { scenarioId, levers, selectedStrategyId, setScenario, setLevers, selectStrategy, activated, activateMission } = useMission();
-  const nesi = useSecurityIndex((s) => s.value);
+  const setNesi = useSecurityIndex((s) => s.set);
 
   // Data
   const { data: scenarios } = useScenarios();
@@ -51,6 +51,8 @@ export function UnifiedMissionControl() {
   const { data: simResult } = useSimulation(scenarioId, levers);
   const { data: councilResult } = useCouncil(scenarioId, levers);
   const { data: satellite } = useSatelliteLayers();
+  const { data: operational } = useOperationalSnapshot();
+  const { data: sourceStatus } = useSourceStatus();
 
   const [activating, setActivating] = useState(false);
 
@@ -125,6 +127,15 @@ export function UnifiedMissionControl() {
 
   const activeStrategyId = selectedStrategyId || councilResult?.recommended_strategy_id;
   const missionId = councilResult?.mission_id;
+  const { data: missionRecord } = useMissionRecord(missionId ?? null);
+  const missionActive = activated || missionRecord?.status === "active" || missionRecord?.status === "completed";
+  const liveSources = sourceStatus?.sources.filter((source) => source.provenance === "live" && source.healthy).length ?? 0;
+  const maxCorridor = operational?.corridors.reduce((top, row) =>
+    !top || row.disruption_probability > top.disruption_probability ? row : top, undefined as typeof operational.corridors[number] | undefined);
+
+  useEffect(() => {
+    if (simResult) setNesi(simResult.nesi_after.value);
+  }, [setNesi, simResult]);
 
   const handleInitiateMission = async () => {
     if (!missionId) {
@@ -136,7 +147,10 @@ export function UnifiedMissionControl() {
     
     setActivating(true);
     try {
-      await apiPostOperator(`/api/missions/${missionId}/activate`, pin);
+      await apiPostOperator(`/api/missions/${missionId}/activate`, pin, {
+        strategy_id: activeStrategyId,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["mission", missionId] });
       activateMission();
       setBottomDrawer("timeline");
       setRightDrawer("none");
@@ -162,11 +176,12 @@ export function UnifiedMissionControl() {
             events={intelFeed?.events ?? []}
             mapMode={mapMode}
             scenarioId={scenarioId}
-            activated={activated}
             satelliteLayers={satellite?.layers}
             baseLayerId={effectiveBase}
             overlayIds={overlays}
             impacted={impacted}
+            stations={operational?.stations}
+            corridorStates={operational?.corridors}
             onSelect={(item) => {
               setSelectedTwinItem(item);
               setRightDrawer("ontology");
@@ -202,7 +217,7 @@ export function UnifiedMissionControl() {
                   <Layers size={11} /> Imagery
                 </button>
               )}
-              {selectedTwinItem && selectedTwinItem.kind !== "reserve" && (
+              {selectedTwinItem && selectedTwinItem.kind !== "reserve" && selectedTwinItem.kind !== "demand" && (
                 <button
                   onClick={() => setCascadeOpen(true)}
                   className="flex items-center gap-1 px-2 py-1 font-mono text-[10px] uppercase font-bold rounded border border-critical/40 bg-critical/15 text-critical transition-colors hover:bg-critical/25"
@@ -235,8 +250,22 @@ export function UnifiedMissionControl() {
                 onChange={(e) => setScenario(e.target.value)}
                 className="bg-transparent text-signal font-mono text-xs font-bold outline-none cursor-pointer text-right"
               >
-                {scenarios?.map(s => <option key={s.id} value={s.id} className="bg-panel text-ink">{s.name}</option>)}
+                {scenarios?.map(s => <option key={s.id} value={s.id} className="bg-panel text-ink">{s.id === "auto_live" ? "● AUTO · " : ""}{s.name}</option>)}
               </select>
+            </div>
+            <div className="flex items-center justify-between font-mono text-[9px]">
+              <button
+                onClick={() => setScenario("auto_live")}
+                className={cn(
+                  "flex items-center gap-1 rounded border px-1.5 py-0.5 uppercase",
+                  scenarioId === "auto_live" ? "border-nominal/50 bg-nominal/10 text-nominal" : "border-line text-ink-dim hover:text-signal",
+                )}
+              >
+                <Radio size={9} className={scenarioId === "auto_live" ? "animate-pulse" : ""} /> Sync live
+              </button>
+              <span className={operational?.is_live ? "text-nominal" : "text-elevated"}>
+                {operational?.is_live ? "LIVE FUSION" : "DEGRADED"} · Q{operational?.data_quality_score.toFixed(0) ?? "—"}
+              </span>
             </div>
             <div className="h-px w-full bg-line" />
             <div className="flex justify-between font-mono text-[10px]">
@@ -250,6 +279,10 @@ export function UnifiedMissionControl() {
             <div className="flex justify-between font-mono text-[10px]">
               <span className="text-ink-muted">Brent Δ:</span>
               <span className="text-amber-500 font-bold">{(simResult?.brent_change_pct ?? 0) > 0 ? "+" : ""}{(simResult?.brent_change_pct ?? 0).toFixed(1)}%</span>
+            </div>
+            <div className="flex justify-between font-mono text-[10px]">
+              <span className="text-ink-muted">Top corridor:</span>
+              <span className="text-signal font-bold">{maxCorridor ? `${maxCorridor.corridor_id} ${maxCorridor.disruption_probability.toFixed(0)}%` : "—"}</span>
             </div>
           </div>
         </div>
@@ -276,6 +309,21 @@ export function UnifiedMissionControl() {
                 <button onClick={() => setLeftDrawer("none")} className="text-ink-dim hover:text-ink transition-colors"><Minimize2 size={13}/></button>
               </div>
               <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                <div className="rounded border border-signal/25 bg-signal/5 p-2">
+                  <div className="flex items-center justify-between font-mono text-[9px] uppercase">
+                    <span className="flex items-center gap-1 text-signal"><DatabaseZap size={11} /> Operational snapshot</span>
+                    <span className={operational?.is_live ? "text-nominal" : "text-elevated"}>{operational?.id.slice(-8) ?? "loading"}</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-center font-mono">
+                    <div><div className="text-xs font-bold text-ink">{liveSources}</div><div className="text-[8px] uppercase text-ink-dim">live feeds</div></div>
+                    <div><div className="text-xs font-bold text-ink">{operational?.stations.length ?? 0}</div><div className="text-[8px] uppercase text-ink-dim">geo stations</div></div>
+                    <div><div className="text-xs font-bold text-ink">{operational?.vessel_flows.reduce((sum, flow) => sum + flow.live_count, 0) ?? 0}</div><div className="text-[8px] uppercase text-ink-dim">live vessels</div></div>
+                  </div>
+                  <div className="mt-2 flex justify-between text-[9px] text-ink-muted">
+                    <span>Age {operational?.freshness_seconds != null ? `${operational.freshness_seconds}s` : "—"}</span>
+                    <span>Brent ${operational?.market.brent_usd.toFixed(2) ?? "—"}</span>
+                  </div>
+                </div>
                 {intelFeed?.events.map(evt => (
                   <div key={evt.id} className="rounded border border-line bg-panel-hover/80 p-2 cursor-pointer hover:border-signal/50 transition-colors">
                     <div className="flex items-center justify-between mb-1">
@@ -374,6 +422,16 @@ export function UnifiedMissionControl() {
                         </div>
                         <div className="font-mono text-[10px] text-signal">{a.stance}</div>
                         <p className="text-[11px] text-ink-muted leading-relaxed">{a.reasoning}</p>
+                        {a.proposed_levers && (
+                          <div className="flex gap-2 font-mono text-[9px] uppercase text-ink-dim">
+                            <span>SPR {a.proposed_levers.spr_release_pct}%</span>
+                            <span>Reroute {a.proposed_levers.enable_reroute ? "ON" : "OFF"}</span>
+                            <span>Spot {a.proposed_levers.enable_spot ? "ON" : "OFF"}</span>
+                          </div>
+                        )}
+                        <div className="font-mono text-[8px] uppercase text-ink-dim">
+                          {a.reasoning_mode === "llm" ? `${a.llm_provider ?? "LLM"}/${a.llm_model ?? "model"} · ${a.llm_latency_ms ?? "—"}ms` : "Grounded deterministic fallback"}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -390,6 +448,12 @@ export function UnifiedMissionControl() {
                           <span className="text-signal">{strat.score.toFixed(0)} pts</span>
                         </div>
                         <p className="mt-2 text-[10px] text-ink-muted">{strat.thesis}</p>
+                        {strat.optimization && (
+                          <div className="mt-2 flex justify-between font-mono text-[9px] text-ink-dim">
+                            <span>{strat.optimization.candidate_count} plans searched</span>
+                            <span>Council fit {strat.optimization.council_alignment.toFixed(0)}</span>
+                          </div>
+                        )}
                         <button onClick={() => { selectStrategy(strat.id); setBottomDrawer("timeline"); }} className="mt-3 w-full rounded border border-signal/30 bg-signal/10 py-1.5 font-mono text-[10px] font-bold text-signal uppercase hover:bg-signal/20 transition-colors">
                           Stage for Execution
                         </button>
@@ -432,24 +496,24 @@ export function UnifiedMissionControl() {
           <div className="flex items-center justify-between px-4 py-2.5">
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2 border-r border-line pr-4">
-                <Sliders size={15} className={activated ? "text-red-500" : "text-signal"} />
-                <span className={cn("font-mono text-xs font-bold tracking-wider", activated ? "text-red-500" : "text-ink")}>
-                  {activated ? "MISSION PARAMETERS:" : "SIMULATION LEVERS:"}
+                <Sliders size={15} className={missionActive ? "text-red-500" : "text-signal"} />
+                <span className={cn("font-mono text-xs font-bold tracking-wider", missionActive ? "text-red-500" : "text-ink")}>
+                  {missionActive ? "MISSION PARAMETERS:" : "SIMULATION LEVERS:"}
                 </span>
               </div>
               <div className="flex items-center gap-3">
                 <span className="label-terminal text-[10px]">SPR Release:</span>
-                <input type="range" min={0} max={100} step={5} value={levers.spr_release_pct} onChange={(e) => setLevers({ spr_release_pct: Number(e.target.value) })} disabled={activated} className="w-24 accent-signal" />
+                <input type="range" min={0} max={100} step={5} value={levers.spr_release_pct} onChange={(e) => setLevers({ spr_release_pct: Number(e.target.value) })} disabled={missionActive} className="w-24 accent-signal" />
                 <span className="readout text-[11px] font-bold text-signal w-8">{levers.spr_release_pct}%</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="label-terminal text-[10px]">Reroute Cape:</span>
-                <button onClick={() => setLevers({ enable_reroute: !levers.enable_reroute })} disabled={activated} className={cn("rounded px-2.5 py-0.5 font-mono text-[10px] uppercase font-bold border transition-colors", levers.enable_reroute ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-500 shadow-glow-nominal" : "border-line bg-panel text-ink-dim hover:text-ink")}>{levers.enable_reroute ? "ENABLED" : "OFF"}</button>
+                <button onClick={() => setLevers({ enable_reroute: !levers.enable_reroute })} disabled={missionActive} className={cn("rounded px-2.5 py-0.5 font-mono text-[10px] uppercase font-bold border transition-colors", levers.enable_reroute ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-500 shadow-glow-nominal" : "border-line bg-panel text-ink-dim hover:text-ink")}>{levers.enable_reroute ? "ENABLED" : "OFF"}</button>
               </div>
             </div>
 
             {/* Mission Activation */}
-            {!activated ? (
+            {!missionActive ? (
               <button disabled={activating} onClick={handleInitiateMission} className="flex items-center gap-2 rounded border border-signal/50 bg-signal/15 px-4 py-1.5 font-mono text-xs font-bold text-signal hover:bg-signal/25 shadow-glow-signal transition-all disabled:opacity-50">
                 <Rocket size={14} /> {activating ? "AUTHORISING..." : "INITIATE MISSION"}
               </button>

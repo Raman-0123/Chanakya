@@ -14,6 +14,20 @@ def test_daily_horizon_and_finite_spr() -> None:
     assert result.residual_shortfall_kbpd == max(
         day.residual_shortfall_kbpd for day in result.daily_balance
     )
+    assert result.spr_drawdown_plan
+    assert round(sum(site.release_kbpd for site in result.spr_drawdown_plan), 1) == result.spr_release_kbpd
+    assert all(site.replenishment_from_day for site in result.spr_drawdown_plan)
+    assert len(result.refinery_projections) == len(engine.net.refineries)
+    assert 0 <= result.power_sector_stress_pct <= 100
+
+
+def test_digital_twin_reaches_downstream_demand_hubs() -> None:
+    network = build_energy_network()
+    assert network.demand_centers
+    assert round(sum(center.demand_share for center in network.demand_centers), 6) == 1
+    refinery_ids = {refinery.id for refinery in network.refineries}
+    assert all(set(center.supplying_refinery_ids) <= refinery_ids
+               for center in network.demand_centers)
 
 
 def test_overlapping_shocks_do_not_double_count_cargo() -> None:

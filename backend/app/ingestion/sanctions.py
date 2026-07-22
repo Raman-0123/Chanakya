@@ -18,6 +18,10 @@ log = get_logger("ingestion.sanctions")
 
 _OS_URL = "https://api.opensanctions.org/search/default"
 _TTL = 21600  # 6h
+_COUNTRY_NAMES = {
+    "IR": "Iran", "RU": "Russia", "VE": "Venezuela", "IQ": "Iraq",
+    "SA": "Saudi Arabia", "AE": "United Arab Emirates", "KW": "Kuwait",
+}
 
 
 async def fetch_sanctions(limit: int = 8) -> list[SanctionSignal]:
@@ -49,7 +53,10 @@ async def fetch_sanctions(limit: int = 8) -> list[SanctionSignal]:
                         target=res.get("caption", "Unknown"),
                         target_type="vessel",
                         description="Designated vessel linked to sanctioned oil trade.",
-                        affected_countries=[c.upper() for c in res.get("countries", [])],
+                        affected_countries=[
+                            _COUNTRY_NAMES.get(str(country).upper(), str(country))
+                            for country in res.get("countries", [])
+                        ],
                         source="OpenSanctions", source_kind=SourceKind.LIVE,
                     ))
     except Exception as exc:  # noqa: BLE001

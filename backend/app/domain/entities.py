@@ -125,6 +125,18 @@ class StrategicReserveSite(BaseModel):
         return round(self.capacity_mmt * self.fill_pct / 100, 3)
 
 
+class DemandCenter(BaseModel):
+    """Downstream product-demand hub supplied by one or more refineries."""
+
+    id: str
+    name: str
+    region: str
+    coords: GeoPoint
+    demand_share: float = Field(ge=0, le=1)
+    sector_mix: dict[str, float] = Field(default_factory=dict)
+    supplying_refinery_ids: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 #  Market + macro baseline
 # ---------------------------------------------------------------------------
@@ -152,6 +164,7 @@ class EnergyNetwork(BaseModel):
     ports: list[Port]
     refineries: list[Refinery]
     reserves: list[StrategicReserveSite]
+    demand_centers: list[DemandCenter] = Field(default_factory=list)
     market: MarketState
     demand: DemandProfile
 

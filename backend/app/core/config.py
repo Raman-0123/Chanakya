@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     event_stream_name: str = "chanakya:events"
     event_dead_letter_stream: str = "chanakya:events:dead"
     event_stream_maxlen: int = 5000
+    auto_response_enabled: bool = True
+    auto_response_cooldown_seconds: int = 900
+    auto_response_min_quality: float = 35.0
+    auto_response_min_probability: float = 45.0
 
     # ---- LLM providers ----
     llm_primary_provider: str = "groq"

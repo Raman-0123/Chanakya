@@ -30,7 +30,7 @@ interface MissionState {
 export const useMission = create<MissionState>()(
   persist(
     (set) => ({
-      scenarioId: "hormuz_closure",
+      scenarioId: "auto_live",
       levers: DEFAULT_LEVERS,
       selectedStrategyId: null,
       activated: false,
@@ -42,7 +42,7 @@ export const useMission = create<MissionState>()(
       activateMission: () => set({ activated: true }),
       reset: () =>
         set({
-          scenarioId: "hormuz_closure",
+          scenarioId: "auto_live",
           levers: DEFAULT_LEVERS,
           selectedStrategyId: null,
           activated: false,
@@ -50,13 +50,14 @@ export const useMission = create<MissionState>()(
     }),
     {
       name: "chanakya-mission-state",
+      version: 2,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         scenarioId: state.scenarioId,
         levers: state.levers,
         selectedStrategyId: state.selectedStrategyId,
-        activated: state.activated,
       }),
+      migrate: (persisted) => ({ ...(persisted as Partial<MissionState>), activated: false }),
     },
   ),
 );

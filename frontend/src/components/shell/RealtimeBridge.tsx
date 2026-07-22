@@ -24,6 +24,7 @@ export function RealtimeBridge() {
       void queryClient.invalidateQueries({ queryKey: ["graph"] });
       void queryClient.invalidateQueries({ queryKey: ["source-status"] });
       void queryClient.invalidateQueries({ queryKey: ["system-health"] });
+      void queryClient.invalidateQueries({ queryKey: ["operational-snapshot"] });
     };
 
     const connect = () => {
@@ -55,8 +56,17 @@ export function RealtimeBridge() {
           }
           setRealtime({ status: "live", cursor,
             lastMessageAt: new Date().toISOString() });
-          if (payload.type === "intelligence.event" || payload.type === "source.status") {
+          if (payload.type === "intelligence.event" || payload.type === "source.status" ||
+              payload.type === "operations.snapshot") {
             invalidateOperationalCaches();
+            if (payload.type === "operations.snapshot") {
+              void queryClient.invalidateQueries({ queryKey: ["simulation", "auto_live"] });
+              void queryClient.invalidateQueries({ queryKey: ["scenarios"] });
+            }
+          }
+          if (payload.type === "operations.recommendation") {
+            void queryClient.invalidateQueries({ queryKey: ["mission-latest"] });
+            void queryClient.invalidateQueries({ queryKey: ["mission"] });
           }
         } catch {
           setRealtime({ status: "degraded" });

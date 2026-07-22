@@ -10,7 +10,8 @@ export function SystemStatus() {
   const realtime = useRealtime((state) => state.status);
 
   const online = !isError && !isLoading && data?.status === "ok";
-  const llmUp = data?.llm.available ?? false;
+  const llmVerified = data?.llm.runtime_verified ?? false;
+  const llmConfigured = data?.llm.configured ?? data?.llm.available ?? false;
   const stores = data?.datastores ?? {};
   const storesUp = Object.values(stores).filter(Boolean).length;
   const storesTotal = Object.keys(stores).length;
@@ -24,13 +25,19 @@ export function SystemStatus() {
       />
       <Indicator
         on={realtime === "live"}
-        label="Stream"
-        detail={realtime}
+        label="Socket"
+        detail={realtime === "live" ? "connected" : realtime}
       />
       <Indicator
-        on={llmUp}
-        label="Council"
-        detail={llmUp ? `${data?.llm.providers.length} llm` : "no key"}
+        on={llmVerified}
+        label="LLM"
+        detail={
+          llmVerified
+            ? `${data?.llm.verified_providers?.[0] ?? "provider"} verified`
+            : llmConfigured
+              ? `${data?.llm.providers.length ?? 0} configured · unverified`
+              : "no key"
+        }
       />
       <Indicator
         on={storesUp > 0}

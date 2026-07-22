@@ -2,7 +2,9 @@
 
 import "leaflet/dist/leaflet.css";
 import { MapContainer, TileLayer, Polyline, CircleMarker, Tooltip } from "react-leaflet";
-import type { IntelEvent, NetworkData, SatelliteLayer, Vessel } from "@/lib/types";
+import type {
+  CorridorOperationalState, GeoStation, IntelEvent, NetworkData, SatelliteLayer, Vessel,
+} from "@/lib/types";
 import { SEVERITY_META } from "@/lib/severity";
 import { cn } from "@/lib/utils";
 
@@ -10,12 +12,13 @@ const CASCADE_COLOR: Record<string, string> = {
   offline: "#ef4444",
   critical: "#f97316",
   strained: "#eab308",
+  high: "#f97316",
   elevated: "#eab308",
   nominal: "#10b981",
 };
 
 export interface TwinSelection {
-  kind: "refinery" | "port" | "supplier" | "reserve" | "corridor";
+  kind: "refinery" | "port" | "supplier" | "reserve" | "corridor" | "demand";
   id: string;
 }
 
@@ -41,11 +44,12 @@ export default function EnergyMap({
   events,
   mapMode,
   scenarioId,
-  activated,
   satelliteLayers,
   baseLayerId,
   overlayIds,
   impacted,
+  stations,
+  corridorStates,
   onSelect,
 }: {
   network: NetworkData;
@@ -53,14 +57,20 @@ export default function EnergyMap({
   events: IntelEvent[];
   mapMode: MapMode;
   scenarioId?: string;
-  activated?: boolean;
   satelliteLayers?: SatelliteLayer[];
   baseLayerId?: string;
   overlayIds?: string[];
   impacted?: Record<string, string>;
+  stations?: GeoStation[];
+  corridorStates?: CorridorOperationalState[];
   onSelect: (sel: TwinSelection) => void;
 }) {
   const mappableEvents = events.filter((event) => event.lat !== null && event.lon !== null);
+  const corridorState = new Map((corridorStates ?? []).map((row) => [row.corridor_id, row]));
+  const portStation = new Map(
+    (stations ?? []).filter((station) => station.kind === "port")
+      .map((station) => [station.affected_entity_ids[0]?.replace("port:", ""), station]),
+  );
   const bases = (satelliteLayers ?? []).filter((l) => l.kind === "base");
   const gibsBase = bases.find((l) => l.id === baseLayerId) ?? bases[0];
   const gibsOverlays = (satelliteLayers ?? []).filter(
@@ -126,7 +136,9 @@ export default function EnergyMap({
             key={c.id}
             positions={c.path.map((p) => [p.lat, p.lon]) as [number, number][]}
             pathOptions={{
-              color: STATUS_COLOR[c.status] ?? "#22d3ee",
+              color: corridorState.get(c.id)
+                ? CASCADE_COLOR[corridorState.get(c.id)!.band] ?? "#22d3ee"
+                : STATUS_COLOR[c.status] ?? "#22d3ee",
               weight: 1.5 + c.import_share * 6,
               opacity: 0.55,
               dashArray: c.status === "operational" ? undefined : "6 6",
@@ -135,6 +147,9 @@ export default function EnergyMap({
           >
             <Tooltip sticky>
               {c.name} · {(c.import_share * 100).toFixed(0)}% of imports
+              {corridorState.get(c.id) && (
+                <><br />Disruption probability {corridorState.get(c.id)!.disruption_probability.toFixed(1)}%</>
+              )}
             </Tooltip>
           </Polyline>
         ) : null,
@@ -159,17 +174,49 @@ export default function EnergyMap({
       ))}
 
       {/* Ports */}
-      {network.ports.map((p) => (
+      {network.ports.map((p) => {
+        const station = portStation.get(p.id);
+        const color = station ? CASCADE_COLOR[station.status] ?? "#22d3ee" : "#22d3ee";
+        return (
         <CircleMarker
           key={p.id}
           center={[p.coords.lat, p.coords.lon]}
           radius={4}
-          pathOptions={{ color: "#22d3ee", fillColor: "#22d3ee", fillOpacity: 0.6, weight: 1 }}
+          pathOptions={{ color, fillColor: color, fillOpacity: 0.6, weight: station?.status === "high" || station?.status === "critical" ? 3 : 1 }}
           eventHandlers={{ click: () => onSelect({ kind: "port", id: p.id }) }}
         >
-          <Tooltip>{p.name}</Tooltip>
+          <Tooltip>{p.name}{station ? ` · ${station.status.toUpperCase()}` : ""}</Tooltip>
         </CircleMarker>
-      ))}
+        );
+      })}
+
+      {/* Provenance-bearing geospatial monitoring stations. */}
+      {(stations ?? []).filter((station) => station.kind === "weather" || station.kind === "chokepoint")
+        .map((station) => {
+          const color = CASCADE_COLOR[station.status] ?? "#8aa0bf";
+          return (
+            <CircleMarker
+              key={station.id}
+              center={[station.lat, station.lon]}
+              radius={station.kind === "chokepoint" ? 11 : 7}
+              pathOptions={{
+                color,
+                fillColor: color,
+                fillOpacity: station.provenance === "live" ? 0.24 : 0.08,
+                weight: 2,
+                dashArray: station.provenance === "live" ? undefined : "3 4",
+              }}
+            >
+              <Tooltip sticky>
+                {station.kind.toUpperCase()} STATION · {station.provenance.toUpperCase()}
+                <br />{station.name} · risk {station.risk_score.toFixed(0)}
+                {Object.entries(station.metrics).slice(0, 3).map(([key, value]) => (
+                  <span key={key}><br />{key.replaceAll("_", " ")}: {String(value ?? "—")}</span>
+                ))}
+              </Tooltip>
+            </CircleMarker>
+          );
+        })}
 
       {/* Refineries — sized by capacity, colored by utilisation (or cascade impact) */}
       {network.refineries.map((r) => {
@@ -210,6 +257,19 @@ export default function EnergyMap({
         </CircleMarker>
       ))}
 
+      {/* Downstream product-demand hubs complete the wellhead→consumer twin. */}
+      {network.demand_centers.map((center) => (
+        <CircleMarker
+          key={center.id}
+          center={[center.coords.lat, center.coords.lon]}
+          radius={4 + center.demand_share * 16}
+          pathOptions={{ color: "#a78bfa", fillColor: "#a78bfa", fillOpacity: 0.18, weight: 1.5 }}
+          eventHandlers={{ click: () => onSelect({ kind: "demand", id: center.id }) }}
+        >
+          <Tooltip>{center.name} · {(center.demand_share * 100).toFixed(0)}% product demand</Tooltip>
+        </CircleMarker>
+      ))}
+
       {/* Vessel wake tracks */}
       {vessels.map((v) =>
         v.track && v.track.length >= 2 ? (
@@ -226,7 +286,7 @@ export default function EnergyMap({
       )}
 
       {/* Vessels */}
-      {vessels.map((v) => (
+      {vessels.filter((v) => v.kind.includes("tanker") || v.kind === "unknown").map((v) => (
         <CircleMarker
           key={v.id}
           center={[v.lat, v.lon]}
@@ -238,7 +298,10 @@ export default function EnergyMap({
             weight: 0,
           }}
         >
-          <Tooltip>{v.name} · {v.cargo_kbbl?.toFixed(0)} kbbl</Tooltip>
+          <Tooltip>
+            {v.name} · {v.kind.toUpperCase()} · {v.source_kind?.toUpperCase() ?? "UNKNOWN SOURCE"}
+            <br />{v.corridor_id ?? "outside monitored corridor"} · {v.speed_kn.toFixed(1)} kn
+          </Tooltip>
         </CircleMarker>
       ))}
 
@@ -269,50 +332,18 @@ export default function EnergyMap({
         );
       })}
 
-      {/* Simulated Scenario Overlays */}
+      {/* Explicit catalog-simulation overlay; never represented as observed telemetry. */}
       {scenarioId === "hormuz_closure" && (
-        <>
-          {/* Conflict Zone / Blockade Area */}
-          <CircleMarker
-            center={[26.5, 56.2]}
-            radius={45}
-            pathOptions={{
-              color: "#ef4444",
-              fillColor: "#ef4444",
-              fillOpacity: 0.15,
-              weight: 2,
-              dashArray: "4 6",
-              className: "animate-pulse"
-            }}
-          >
-            <Tooltip sticky>HORMUZ CHOKEPOINT — HIGH RISK CONFLICT ZONE</Tooltip>
-          </CircleMarker>
-
-          {/* Military Equipment (Only shown when executing) */}
-          {activated && (
-            <>
-              {/* Carrier Strike Group */}
-              <CircleMarker
-                center={[22.5, 62.0]}
-                radius={8}
-                pathOptions={{
-                  color: "#00f0ff",
-                  fillColor: "#00f0ff",
-                  fillOpacity: 0.4,
-                  weight: 2,
-                }}
-              >
-                <Tooltip sticky>TASK FORCE 74 — CARRIER STRIKE GROUP</Tooltip>
-              </CircleMarker>
-              <Polyline
-                positions={[[22.5, 62.0], [25.0, 58.0]]}
-                pathOptions={{ color: "#00f0ff", weight: 2, dashArray: "5 5", opacity: 0.7 }}
-              >
-                <Tooltip sticky>Projected Intercept Vector</Tooltip>
-              </Polyline>
-            </>
-          )}
-        </>
+        <CircleMarker
+          center={[26.5, 56.2]}
+          radius={45}
+          pathOptions={{
+            color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.08,
+            weight: 2, dashArray: "4 6",
+          }}
+        >
+          <Tooltip sticky>CATALOG SIMULATION · HORMUZ 90% CLOSURE (NOT A LIVE OBSERVATION)</Tooltip>
+        </CircleMarker>
       )}
     </MapContainer>
   );

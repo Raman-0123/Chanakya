@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { Rocket, FileText, CheckCircle2, Circle, Loader2, ShieldCheck, AlertOctagon, Download } from "lucide-react";
-import { useCouncil, useLatestMission } from "@/hooks/useChanakya";
+import { Rocket, FileText, CheckCircle2, Circle, Loader2, AlertOctagon, Download } from "lucide-react";
+import { useCouncil, useLatestMission, useMissionRecord } from "@/hooks/useChanakya";
 import { useMission } from "@/stores/useMission";
 import { Panel, PanelHeader } from "@/components/primitives";
 import { CrisisTimeline } from "./CrisisTimeline";
-import type { StrategyOption } from "@/lib/types";
+import type { MissionRecord, MissionTask, StrategyOption } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { apiPostOperator } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
 
 function agencyFor(step: string): string {
   const t = step.toLowerCase();
@@ -28,17 +29,21 @@ function priorityFor(i: number): string {
 }
 
 export function ExecutionRoom() {
+  const queryClient = useQueryClient();
   const { scenarioId, levers, selectedStrategyId, activated, activateMission } = useMission();
   const { data: council, isLoading: councilLoading } = useCouncil(scenarioId, levers);
   const { data: latestMission, isLoading: missionLoading } = useLatestMission(scenarioId);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [activating, setActivating] = useState(false);
 
+  const missionId = council?.mission_id ?? latestMission?.id ?? null;
+  const { data: missionRecord } = useMissionRecord(missionId);
+  const mission = missionRecord ?? latestMission;
+  const missionActive = activated || mission?.status === "active" || mission?.status === "completed";
   const strategy =
     council?.strategies.find((s) => s.id === (selectedStrategyId ?? council.recommended_strategy_id)) ??
-    latestMission?.strategy ??
+    mission?.strategy ??
     null;
-  const missionId = council?.mission_id ?? latestMission?.id ?? null;
   const scenarioName = council?.scenario_name ?? scenarioId.replaceAll("_", " ");
   const sourceLabel = council
     ? "LIVE COUNCIL REASONING"
@@ -52,7 +57,7 @@ export function ExecutionRoom() {
       : "No mission record yet";
 
   const launch = async () => {
-    if (!missionId) {
+    if (!missionId || !strategy) {
       setActivationError("No mission record is available yet. Run the Decision Center first.");
       return;
     }
@@ -61,7 +66,13 @@ export function ExecutionRoom() {
     setActivating(true);
     setActivationError(null);
     try {
-      await apiPostOperator(`/api/missions/${missionId}/activate`, pin);
+      await apiPostOperator<MissionRecord>(`/api/missions/${missionId}/activate`, pin, {
+        strategy_id: strategy.id,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["mission", missionId] }),
+        queryClient.invalidateQueries({ queryKey: ["mission-latest", scenarioId] }),
+      ]);
       activateMission();
     } catch (error) {
       setActivationError(error instanceof Error ? error.message : "Mission activation failed");
@@ -84,17 +95,17 @@ export function ExecutionRoom() {
         </div>
 
         <button
-          disabled={!strategy || activated || activating}
+          disabled={!strategy || missionActive || activating}
           onClick={() => void launch()}
           className={cn(
             "flex items-center gap-2 rounded px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider transition-all",
-            activated
+            missionActive
               ? "border border-emerald-500/50 bg-emerald-500/15 text-emerald-500 shadow-glow-nominal"
               : "border border-signal/50 bg-signal/15 text-signal hover:bg-signal/25 shadow-glow-signal disabled:opacity-40",
           )}
         >
           <Rocket size={15} />
-          {activated ? "MISSION ACTIVE" : activating ? "AUTHORISING PIN…" : "LAUNCH MISSION PLAYBOOK"}
+          {missionActive ? `MISSION ${mission?.status.toUpperCase() ?? "ACTIVE"}` : activating ? "AUTHORISING PIN…" : "LAUNCH MISSION PLAYBOOK"}
         </button>
       </div>
 
@@ -109,7 +120,7 @@ export function ExecutionRoom() {
         <>
           <CrisisTimeline />
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.1fr_1fr]">
-            <MissionChecklist strategy={strategy} activated={activated} />
+            <MissionChecklist strategy={strategy} mission={mission ?? null} missionId={missionId} activated={missionActive} />
             <BriefingPack strategy={strategy} scenario={scenarioName} />
           </div>
         </>
@@ -134,68 +145,110 @@ export function ExecutionRoom() {
   );
 }
 
-function MissionChecklist({ strategy, activated }: { strategy: StrategyOption; activated: boolean }) {
-  const [done, setDone] = useState<number>(0);
+function MissionChecklist({
+  strategy, mission, missionId, activated,
+}: {
+  strategy: StrategyOption;
+  mission: MissionRecord | null;
+  missionId: string | null;
+  activated: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [updating, setUpdating] = useState<string | null>(null);
+  const [taskError, setTaskError] = useState<string | null>(null);
+  const fallbackTasks: MissionTask[] = strategy.implementation_steps.map((action, index) => ({
+    id: `draft-${index + 1}`, sequence: index + 1, action,
+    agency: agencyFor(action), priority: priorityFor(index), status: "pending",
+    acknowledged_at: null, completed_at: null, note: null,
+  }));
+  const tasks = mission?.tasks?.length ? mission.tasks : fallbackTasks;
 
-  // when activated, progress the checklist over time
-  useEffect(() => {
-    if (!activated) {
-      setDone(0);
+  const advance = async (task: MissionTask, status: MissionTask["status"]) => {
+    if (!missionId || task.id.startsWith("draft-")) {
+      setTaskError("Activate a persisted mission before updating agency tasks.");
       return;
     }
-    setDone(0);
-    const id = setInterval(() => {
-      setDone((d) => {
-        if (d >= strategy.implementation_steps.length) {
-          clearInterval(id);
-          return d;
-        }
-        return d + 1;
-      });
-    }, 1100);
-    return () => clearInterval(id);
-  }, [activated, strategy.implementation_steps.length]);
+    const pin = window.prompt(`Operator PIN required to mark ${task.agency} task ${status}`);
+    if (!pin) return;
+    const note = status === "blocked" ? window.prompt("Blocking note (optional)") : null;
+    setUpdating(task.id);
+    setTaskError(null);
+    try {
+      await apiPostOperator<MissionRecord>(`/api/missions/${missionId}/tasks/${task.id}`, pin, { status, note });
+      await queryClient.invalidateQueries({ queryKey: ["mission", missionId] });
+    } catch (error) {
+      setTaskError(error instanceof Error ? error.message : "Task update failed");
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const nextStatus = (status: MissionTask["status"]): MissionTask["status"] | null => {
+    if (status === "queued" || status === "pending") return "acknowledged";
+    if (status === "acknowledged" || status === "blocked") return "in_progress";
+    if (status === "in_progress") return "completed";
+    return null;
+  };
 
   return (
     <div className="tactical-panel">
       <PanelHeader eyebrow="Operational Playbook" title="Action Checklist & Inter-Agency Sequence" />
+      {taskError && <div className="mx-4 mt-3 rounded border border-critical/40 bg-critical/10 px-3 py-2 font-mono text-[10px] text-critical">{taskError}</div>}
       <div className="divide-y divide-line">
-        {strategy.implementation_steps.map((step, i) => {
-          const state = !activated ? "pending" : i < done ? "done" : i === done ? "active" : "pending";
+        {tasks.map((task, i) => {
+          const state = task.status;
+          const next = nextStatus(state);
           return (
             <motion.div
-              key={i}
+              key={task.id}
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.05 }}
               className="flex items-start gap-3 px-4 py-3 hover:bg-panel-hover transition-colors"
             >
               <span className="mt-0.5">
-                {state === "done" ? (
+                {state === "completed" ? (
                   <CheckCircle2 size={16} className="text-emerald-500" />
-                ) : state === "active" ? (
+                ) : state === "in_progress" || updating === task.id ? (
                   <Loader2 size={16} className="animate-spin text-signal" />
                 ) : (
                   <Circle size={16} className="text-ink-dim" />
                 )}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-ink font-mono">{step}</div>
+                <div className="text-xs font-semibold text-ink font-mono">{task.action}</div>
                 <div className="mt-1 flex items-center gap-2">
                   <span className="rounded bg-panel border border-line px-2 py-0.5 font-mono text-[10px] uppercase text-signal font-bold">
-                    {agencyFor(step)}
+                    {task.agency}
                   </span>
                   <span
                     className={cn(
                       "font-mono text-[10px] font-bold px-1.5 py-0.2 rounded",
-                      i === 0 ? "bg-red-950/60 text-red-500 border border-red-800/40" : i <= 2 ? "bg-amber-950/60 text-amber-500 border border-amber-800/40" : "bg-panel text-ink-muted",
+                      task.priority === "P0" ? "bg-red-950/60 text-red-500 border border-red-800/40" : task.priority === "P1" ? "bg-amber-950/60 text-amber-500 border border-amber-800/40" : "bg-panel text-ink-muted",
                     )}
                   >
-                    {priorityFor(i)}
+                    {task.priority}
                   </span>
                   <span className="font-mono text-[10px] uppercase text-ink-dim">{state}</span>
                 </div>
+                {task.note && <div className="mt-1 text-[10px] text-critical">Blocked: {task.note}</div>}
               </div>
+              {activated && next && (
+                <div className="flex shrink-0 gap-1">
+                  {state !== "blocked" && state !== "in_progress" && (
+                    <button
+                      disabled={updating === task.id}
+                      onClick={() => void advance(task, "blocked")}
+                      className="rounded border border-critical/30 px-2 py-1 font-mono text-[9px] uppercase text-critical hover:bg-critical/10 disabled:opacity-40"
+                    >Block</button>
+                  )}
+                  <button
+                    disabled={updating === task.id}
+                    onClick={() => void advance(task, next)}
+                    className="rounded border border-signal/40 bg-signal/10 px-2 py-1 font-mono text-[9px] uppercase text-signal hover:bg-signal/20 disabled:opacity-40"
+                  >{next.replace("in_progress", "start")}</button>
+                </div>
+              )}
             </motion.div>
           );
         })}

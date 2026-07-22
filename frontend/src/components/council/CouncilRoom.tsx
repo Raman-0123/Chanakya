@@ -151,6 +151,20 @@ function AgentCard({ a, index }: { a: AgentAssessment; index: number }) {
           <div className="text-xs text-ink">{a.recommendation}</div>
         </div>
 
+        {a.proposed_levers && (
+          <div className="mt-2 grid grid-cols-3 gap-1 rounded border border-line bg-base/40 p-2 text-center font-mono">
+            <div><div className="text-xs font-bold text-signal">{a.proposed_levers.spr_release_pct}%</div><div className="text-[8px] uppercase text-ink-dim">SPR</div></div>
+            <div><div className="text-xs font-bold text-signal">{a.proposed_levers.enable_reroute ? "ON" : "OFF"}</div><div className="text-[8px] uppercase text-ink-dim">Reroute</div></div>
+            <div><div className="text-xs font-bold text-signal">{a.proposed_levers.enable_spot ? "ON" : "OFF"}</div><div className="text-[8px] uppercase text-ink-dim">Spot</div></div>
+          </div>
+        )}
+
+        <div className="mt-2 font-mono text-[9px] uppercase text-ink-dim">
+          {a.reasoning_mode === "llm"
+            ? `${a.llm_provider ?? "LLM"} · ${a.llm_model ?? "model"} · ${a.llm_latency_ms ?? "—"}ms`
+            : "Grounded deterministic fallback · no model call"}
+        </div>
+
         {a.concerns.length > 0 && (
           <div className="mt-2 text-xs text-elevated">
             ⚠ {a.concerns.join(" · ")}

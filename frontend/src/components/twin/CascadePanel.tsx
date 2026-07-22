@@ -125,6 +125,8 @@ export function CascadePanel({
                   value={rollup.isolated_count}
                   accent="#ef4444"
                 />
+                <MetricReadout label="Demand hubs" value={rollup.distribution_hubs_affected ?? 0} accent="#a78bfa" />
+                <MetricReadout label="Power-linked risk" value={rollup.power_linked_demand_at_risk_pct ?? 0} unit="%" accent="#eab308" />
               </div>
 
               {data.macro_projection && (

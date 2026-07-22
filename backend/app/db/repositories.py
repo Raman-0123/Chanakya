@@ -80,10 +80,36 @@ CREATE TABLE IF NOT EXISTS execution_audit (
 """
 
 
+def _tasks_from_strategy(strategy: dict) -> list[dict]:
+    def agency(step: str) -> str:
+        value = step.lower()
+        if "spr" in value or "reserve" in value:
+            return "ISPRL"
+        if any(token in value for token in ("tender", "procure", "cargo", "iocl")):
+            return "IOCL / BPCL / HPCL"
+        if any(token in value for token in ("tanker", "route", "tonnage", "insurance")):
+            return "DG Shipping"
+        if "cabinet" in value or "crisis cell" in value:
+            return "National Crisis Cell"
+        return "MoPNG"
+
+    return [
+        {
+            "id": f"task-{index + 1:02d}", "sequence": index + 1,
+            "action": step, "agency": agency(step),
+            "priority": "P0" if index == 0 else "P1" if index <= 3 else "P2",
+            "status": "pending", "acknowledged_at": None,
+            "completed_at": None, "note": None,
+        }
+        for index, step in enumerate(strategy.get("implementation_steps", []))
+    ]
+
+
 class RepositoryHub:
     def __init__(self) -> None:
         self._stores: Any = None
         self._events: dict[str, dict] = {}
+        self._vessels: dict[str, dict] = {}
         self._workflows: dict[str, dict] = {}
         self._missions: dict[str, dict] = {}
 
@@ -276,13 +302,29 @@ class RepositoryHub:
         rows = await self.list_missions(scenario_id)
         return rows[0] if rows else None
 
-    async def activate_mission(self, mission_id: str) -> dict | None:
+    async def activate_mission(
+        self, mission_id: str, strategy_id: str | None = None,
+    ) -> dict | None:
         row = await self.get_mission(mission_id)
         if not row:
             return None
+        if strategy_id and strategy_id != row.get("strategy_id"):
+            workflow_id = row.get("workflow_run_id")
+            workflow = await self.get_workflow(workflow_id) if workflow_id else None
+            choices = (workflow or {}).get("result", {}).get("strategies", [])
+            selected = next((item for item in choices if item.get("id") == strategy_id), None)
+            if selected is None:
+                return None
+            row["strategy_id"] = strategy_id
+            row["strategy"] = selected
+            row["tasks"] = _tasks_from_strategy(selected)
         now_dt = datetime.now(timezone.utc)
         now = now_dt.isoformat()
-        row.update({"status": "active", "activated_at": now})
+        tasks = [
+            {**task, "status": "queued" if task.get("status") == "pending" else task.get("status")}
+            for task in row.get("tasks", [])
+        ]
+        row.update({"status": "active", "activated_at": now, "tasks": tasks})
         self._missions[mission_id] = row
         if self.pg is not None:
             try:
@@ -298,6 +340,46 @@ class RepositoryHub:
                             "payload": json.dumps({"status": "active"})})
             except Exception as exc:  # noqa: BLE001
                 log.warning("repository.mission_activate_failed", error=str(exc))
+        return row
+
+    async def update_mission_task(
+        self, mission_id: str, task_id: str, status: str, note: str | None = None,
+    ) -> dict | None:
+        row = await self.get_mission(mission_id)
+        if not row:
+            return None
+        tasks = list(row.get("tasks", []))
+        target = next((task for task in tasks if task.get("id") == task_id), None)
+        if target is None:
+            return None
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        target["status"] = status
+        target["note"] = note
+        if status in {"acknowledged", "in_progress"} and not target.get("acknowledged_at"):
+            target["acknowledged_at"] = now
+        if status == "completed":
+            target["acknowledged_at"] = target.get("acknowledged_at") or now
+            target["completed_at"] = now
+        row["tasks"] = tasks
+        if tasks and all(task.get("status") == "completed" for task in tasks):
+            row["status"] = "completed"
+        self._missions[mission_id] = row
+        if self.pg is not None:
+            try:
+                async with self.pg.begin() as conn:
+                    await conn.execute(text("""
+                        UPDATE missions SET status=:status, payload=CAST(:payload AS JSONB)
+                        WHERE id=:id
+                    """), {"id": mission_id, "status": row["status"],
+                            "payload": json.dumps(row)})
+                    await conn.execute(text("""
+                        INSERT INTO execution_audit(mission_id,action,occurred_at,payload)
+                        VALUES (:id,:action,:now,CAST(:payload AS JSONB))
+                    """), {"id": mission_id, "action": f"task.{status}", "now": now_dt,
+                            "payload": json.dumps({"task_id": task_id, "note": note})})
+            except Exception as exc:  # noqa: BLE001
+                log.warning("repository.mission_task_update_failed", error=str(exc))
         return row
 
     async def _get_json_row(self, table: str, row_id: str, fallback: dict) -> dict | None:
@@ -319,7 +401,7 @@ class RepositoryHub:
         net = build_energy_network()
         try:
             async with self.neo4j.session() as session:
-                for label in ("Country", "Supplier", "Corridor", "Port", "Refinery", "Reserve",
+                for label in ("Country", "Supplier", "Corridor", "Port", "Refinery", "Reserve", "DistributionHub",
                               "Vessel", "Conflict", "WeatherEvent", "MarketSignal", "Sanction"):
                     await session.run(f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS "
                                       f"FOR (n:{label}) REQUIRE n.id IS UNIQUE")
@@ -341,9 +423,17 @@ class RepositoryHub:
                 for corridor in net.corridors:
                     await session.run("""
                         MERGE (c:Corridor {id:$id}) SET c.name=$name, c.chokepoint=$chokepoint,
-                          c.import_share=$share, c.status=$status
+                          c.import_share=$share, c.status=$status,
+                          c.base_transit_days=$transit, c.reroute_corridor_id=$reroute,
+                          c.lat=$lat, c.lon=$lon, c.provenance='baseline_model'
                     """, id=corridor.id, name=corridor.name, chokepoint=corridor.chokepoint,
-                        share=corridor.import_share, status=corridor.status.value)
+                        share=corridor.import_share, status=corridor.status.value,
+                        transit=corridor.base_transit_days,
+                        reroute=corridor.reroute_corridor_id,
+                        lat=(corridor.chokepoint_coords.lat
+                             if corridor.chokepoint_coords else None),
+                        lon=(corridor.chokepoint_coords.lon
+                             if corridor.chokepoint_coords else None))
                 # Run supplier relationships again now that all corridor nodes exist.
                 for supplier in net.suppliers:
                     await session.run("""
@@ -378,24 +468,37 @@ class RepositoryHub:
                             MATCH (c:Corridor {id:$cid}), (p:Port {id:$pid})
                             MERGE (c)-[:ARRIVES_AT]->(p)
                         """, cid=corridor.id, pid=port.id)
-                # Grade compatibility creates explainable supplier-to-refinery paths.
-                for supplier in net.suppliers:
-                    for refinery in net.refineries:
-                        compatible = (refinery.preferred_grade == supplier.grade or
-                                      supplier.grade.value == "medium_sour" or
-                                      refinery.preferred_grade.value == "medium_sour")
-                        if compatible:
-                            await session.run("""
-                                MATCH (s:Supplier {id:$sid}), (r:Refinery {id:$rid})
-                                MERGE (s)-[:SUPPLIES {grade:$grade}]->(r)
-                            """, sid=supplier.id, rid=refinery.id,
-                                grade=supplier.grade.value)
+                    if corridor.reroute_corridor_id:
+                        await session.run("""
+                            MATCH (c:Corridor {id:$cid}), (fallback:Corridor {id:$fallback})
+                            MERGE (c)-[:REROUTES_TO {added_days:$days,
+                              cost_premium_pct:$premium}]->(fallback)
+                        """, cid=corridor.id, fallback=corridor.reroute_corridor_id,
+                            days=corridor.reroute_added_days,
+                            premium=corridor.reroute_cost_premium_pct)
+                # Remove the old all-to-all SUPPLIES shortcut. Grade
+                # compatibility is represented through OilGrade nodes below;
+                # physical supply paths remain Supplier→Corridor→Port→Refinery.
+                await session.run("MATCH ()-[r:SUPPLIES|NEAR_INFRASTRUCTURE]->() DELETE r")
                 for reserve in net.reserves:
                     await session.run("""
                         MERGE (r:Reserve {id:$id}) SET r.name=$name, r.capacity_mmt=$capacity,
                           r.fill_pct=$fill, r.lat=$lat, r.lon=$lon
                     """, id=reserve.id, name=reserve.name, capacity=reserve.capacity_mmt,
                         fill=reserve.fill_pct, lat=reserve.coords.lat, lon=reserve.coords.lon)
+                for center in net.demand_centers:
+                    await session.run("""
+                        MERGE (d:DistributionHub {id:$id}) SET d.name=$name,
+                          d.region=$region, d.demand_share=$share,
+                          d.sector_mix_json=$sector_mix, d.lat=$lat, d.lon=$lon
+                    """, id=center.id, name=center.name, region=center.region,
+                        share=center.demand_share, sector_mix=json.dumps(center.sector_mix),
+                        lat=center.coords.lat, lon=center.coords.lon)
+                    for refinery_id in center.supplying_refinery_ids:
+                        await session.run("""
+                            MATCH (r:Refinery {id:$rid}), (d:DistributionHub {id:$did})
+                            MERGE (r)-[:DISTRIBUTES_TO]->(d)
+                        """, rid=refinery_id, did=center.id)
                 # -- Extended ontology: OilGrade, Pipeline, GovernmentAgency,
                 #    EconomicIndicator, and richer relationships --
                 for label in ("OilGrade", "Pipeline", "GovernmentAgency",
@@ -494,16 +597,18 @@ class RepositoryHub:
                                         MATCH (r:Refinery {id:$rid}), (c:Corridor {id:$cid})
                                         MERGE (r)-[:DEPENDS_ON]->(c)
                                     """, rid=refinery.id, cid=corridor.id)
-                # Reserve → HAS_RESERVE → nearby port/refinery
+                # This is an explicit proximity-based response relation, not a
+                # claim that a dedicated reserve pipeline exists.
                 for reserve in net.reserves:
                     await session.run("""
-                        MATCH (res:Reserve {id:$rid}), (n)
-                        WHERE (n:Port OR n:Refinery) AND n.lat IS NOT NULL
+                        MATCH (res:Reserve {id:$rid}), (n:Refinery)
+                        WHERE n.lat IS NOT NULL
                         WITH res, n, point.distance(
                           point({latitude:$lat, longitude:$lon}),
                           point({latitude:n.lat, longitude:n.lon})
                         ) AS dist ORDER BY dist LIMIT 2
-                        MERGE (res)-[:NEAR_INFRASTRUCTURE {distance_km: round(dist/1000)}]->(n)
+                        MERGE (res)-[:CAN_BRIDGE {distance_km: round(dist/1000),
+                          basis:'nearest_two_refineries'}]->(n)
                     """, rid=reserve.id, lat=reserve.coords.lat, lon=reserve.coords.lon)
                 # Economic indicators
                 indicators = [
@@ -563,6 +668,11 @@ class RepositoryHub:
             log.warning("repository.ontology_event_failed", error=str(exc))
 
     async def upsert_vessels(self, vessels: list[Any]) -> None:
+        # Keep the latest positions in-process as well as in Neo4j.  The
+        # ontology must remain queryable when a managed graph store is asleep,
+        # and these records are observations rather than synthetic seed data.
+        for vessel in vessels[:500]:
+            self._vessels[vessel.id] = vessel.model_dump(mode="json")
         if self.neo4j is None:
             return
         try:
@@ -582,6 +692,15 @@ class RepositoryHub:
                         """, vid=vessel.id, cid=vessel.corridor_id)
         except Exception as exc:  # noqa: BLE001
             log.warning("repository.ontology_vessel_failed", error=str(exc))
+
+    async def list_vessels(self, limit: int = 200) -> list[dict]:
+        """Return the most recent observed vessel positions for ontology joins."""
+        rows = sorted(
+            self._vessels.values(),
+            key=lambda row: str(row.get("last_seen_at", "")),
+            reverse=True,
+        )
+        return rows[:max(1, min(limit, 500))]
 
 
 repositories = RepositoryHub()

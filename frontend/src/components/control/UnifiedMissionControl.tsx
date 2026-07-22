@@ -4,10 +4,10 @@ import { useState, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Radar, Globe2, Share2, Users, Brain, Rocket, Crosshair, Minimize2, Maximize2, Search, Sliders, Play, Layers, X
+  Radar, Globe2, Share2, Users, Brain, Rocket, Crosshair, Minimize2, Maximize2, Search, Sliders, Play, Layers, X, Zap
 } from "lucide-react";
 import {
-  useIntelFeed, useNetwork, useScenarios, useSimulation, useCouncil, useSourceStatus
+  useIntelFeed, useNetwork, useScenarios, useSimulation, useCouncil, useSourceStatus, useSatelliteLayers
 } from "@/hooks/useChanakya";
 import { useMission } from "@/stores/useMission";
 import { useSecurityIndex } from "@/stores/useSecurityIndex";
@@ -19,6 +19,8 @@ import { apiPostOperator } from "@/lib/api";
 
 // Drawers & Modals
 import { GraphView } from "@/components/twin/GraphView";
+import { LayerSwitcher } from "@/components/twin/LayerSwitcher";
+import { CascadePanel } from "@/components/twin/CascadePanel";
 import { WorkflowTrace } from "@/components/council/WorkflowTrace";
 import { CrisisTimeline } from "@/components/execution/CrisisTimeline";
 
@@ -48,12 +50,28 @@ export function UnifiedMissionControl() {
   const { data: intelFeed } = useIntelFeed();
   const { data: simResult } = useSimulation(scenarioId, levers);
   const { data: councilResult } = useCouncil(scenarioId, levers);
-  
+  const { data: satellite } = useSatelliteLayers();
+
   const [activating, setActivating] = useState(false);
 
   // Workspace View State
   const [mapMode, setMapMode] = useState<MapMode>("satellite");
   const [selectedTwinItem, setSelectedTwinItem] = useState<TwinSelection | null>(null);
+
+  // Satellite imagery layer selection — default to clean natural-earth (Blue Marble)
+  const [baseLayer, setBaseLayer] = useState("blue_marble");
+  const [overlays, setOverlays] = useState<string[]>([]);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const satLayers = satellite?.layers ?? [];
+  const baseOptions = satLayers.filter((l) => l.kind === "base");
+  const overlayOptions = satLayers.filter((l) => l.kind === "overlay");
+  const effectiveBase = baseLayer || baseOptions[0]?.id || "";
+  const toggleOverlay = (id: string) =>
+    setOverlays((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  // Cascade (block a node -> quantified downstream impact)
+  const [cascadeOpen, setCascadeOpen] = useState(false);
+  const [impacted, setImpacted] = useState<Record<string, string>>({});
   
   // Drawer States
   const [leftDrawer, setLeftDrawer] = useState<"intel" | "none">(pathname === "/intelligence" ? "intel" : pathname === "/" ? "intel" : "none");
@@ -145,6 +163,10 @@ export function UnifiedMissionControl() {
             mapMode={mapMode}
             scenarioId={scenarioId}
             activated={activated}
+            satelliteLayers={satellite?.layers}
+            baseLayerId={effectiveBase}
+            overlayIds={overlays}
+            impacted={impacted}
             onSelect={(item) => {
               setSelectedTwinItem(item);
               setRightDrawer("ontology");
@@ -158,19 +180,50 @@ export function UnifiedMissionControl() {
         
         {/* Map Context Overlay (Top Center inside map) */}
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 flex gap-4 pointer-events-auto items-start">
-          <div className="tactical-panel flex items-center gap-2 p-1.5 bg-panel/95">
-            <button
-              onClick={() => setMapMode("satellite")}
-              className={cn("px-2 py-1 font-mono text-[10px] uppercase font-bold rounded transition-colors", mapMode === "satellite" ? "bg-signal/15 text-signal border border-signal/40" : "text-ink-dim hover:text-ink")}
-            >
-              Satellite
-            </button>
-            <button
-              onClick={() => setMapMode("operations")}
-              className={cn("px-2 py-1 font-mono text-[10px] uppercase font-bold rounded transition-colors", mapMode === "operations" ? "bg-signal/15 text-signal border border-signal/40" : "text-ink-dim hover:text-ink")}
-            >
-              Operations
-            </button>
+          <div className="relative flex flex-col items-center gap-2">
+            <div className="tactical-panel flex items-center gap-2 p-1.5 bg-panel/95">
+              <button
+                onClick={() => setMapMode("satellite")}
+                className={cn("px-2 py-1 font-mono text-[10px] uppercase font-bold rounded transition-colors", mapMode === "satellite" ? "bg-signal/15 text-signal border border-signal/40" : "text-ink-dim hover:text-ink")}
+              >
+                Satellite
+              </button>
+              <button
+                onClick={() => setMapMode("operations")}
+                className={cn("px-2 py-1 font-mono text-[10px] uppercase font-bold rounded transition-colors", mapMode === "operations" ? "bg-signal/15 text-signal border border-signal/40" : "text-ink-dim hover:text-ink")}
+              >
+                Operations
+              </button>
+              {mapMode === "satellite" && baseOptions.length > 0 && (
+                <button
+                  onClick={() => setLayersOpen((o) => !o)}
+                  className={cn("flex items-center gap-1 px-2 py-1 font-mono text-[10px] uppercase font-bold rounded transition-colors", layersOpen ? "bg-signal/15 text-signal border border-signal/40" : "text-ink-dim hover:text-ink")}
+                >
+                  <Layers size={11} /> Imagery
+                </button>
+              )}
+              {selectedTwinItem && selectedTwinItem.kind !== "reserve" && (
+                <button
+                  onClick={() => setCascadeOpen(true)}
+                  className="flex items-center gap-1 px-2 py-1 font-mono text-[10px] uppercase font-bold rounded border border-critical/40 bg-critical/15 text-critical transition-colors hover:bg-critical/25"
+                >
+                  <Zap size={11} /> Cascade
+                </button>
+              )}
+            </div>
+            {mapMode === "satellite" && layersOpen && baseOptions.length > 0 && (
+              <div className="w-[300px]">
+                <LayerSwitcher
+                  baseOptions={baseOptions}
+                  overlayOptions={overlayOptions}
+                  base={effectiveBase}
+                  overlays={overlays}
+                  date={satellite?.date}
+                  onBase={setBaseLayer}
+                  onToggleOverlay={toggleOverlay}
+                />
+              </div>
+            )}
           </div>
           
           {/* Active Mission Parameters overlay */}
@@ -236,6 +289,20 @@ export function UnifiedMissionControl() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* CASCADE PANEL: Palantir-style problem -> impact -> act flow */}
+          {cascadeOpen && selectedTwinItem && (
+            <div className="pointer-events-auto absolute left-[72px] top-4 z-40">
+              <CascadePanel
+                node={selectedTwinItem}
+                onImpactedChange={setImpacted}
+                onClose={() => {
+                  setCascadeOpen(false);
+                  setImpacted({});
+                }}
+              />
             </div>
           )}
 

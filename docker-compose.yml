@@ -35,6 +35,21 @@ services:
       # environment (>=8 chars, not a placeholder) — /readyz blocks production
       # readiness until it is. See .env.production.example.
       OPERATOR_PIN: ${OPERATOR_PIN:-dev-local-pin}
+      # ---- LLM providers (add keys to repo-root .env; compose passes them in) ----
+      # The router tries these in order (primary first) and falls back to the next
+      # on failure/rate-limit; if none are set the council stays deterministic.
+      LLM_PRIMARY_PROVIDER: ${LLM_PRIMARY_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # ---- Optional live-data keys (also read from repo-root .env) ----
+      AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
+      NASA_FIRMS_MAP_KEY: ${NASA_FIRMS_MAP_KEY:-}
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      OPENSANCTIONS_API_KEY: ${OPENSANCTIONS_API_KEY:-}
     ports:
       - "8010:8010"
     depends_on:

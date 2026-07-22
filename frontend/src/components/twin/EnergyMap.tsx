@@ -43,6 +43,8 @@ export default function EnergyMap({
   scenarioId,
   activated,
   satelliteLayers,
+  baseLayerId,
+  overlayIds,
   impacted,
   onSelect,
 }: {
@@ -53,19 +55,27 @@ export default function EnergyMap({
   scenarioId?: string;
   activated?: boolean;
   satelliteLayers?: SatelliteLayer[];
+  baseLayerId?: string;
+  overlayIds?: string[];
   impacted?: Record<string, string>;
   onSelect: (sel: TwinSelection) => void;
 }) {
   const mappableEvents = events.filter((event) => event.lat !== null && event.lon !== null);
-  const gibsBase = satelliteLayers?.find((l) => l.kind === "base");
-  const gibsOverlays = (satelliteLayers ?? []).filter((l) => l.kind === "overlay");
+  const bases = (satelliteLayers ?? []).filter((l) => l.kind === "base");
+  const gibsBase = bases.find((l) => l.id === baseLayerId) ?? bases[0];
+  const gibsOverlays = (satelliteLayers ?? []).filter(
+    (l) => l.kind === "overlay" && (overlayIds ?? []).includes(l.id),
+  );
+  // 1×1 transparent tile so empty GIBS overlay tiles (404) don't show broken icons
+  const BLANK_TILE =
+    "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
   return (
     <MapContainer
       center={[16, 66]}
       zoom={4}
       minZoom={3}
-      maxZoom={7}
+      maxZoom={12}
       className={cn("h-full w-full bg-canvas", mapMode === "operations" && "map-tactical-filter")}
       worldCopyJump
       attributionControl={false}
@@ -78,6 +88,7 @@ export default function EnergyMap({
               key={`gibs-${gibsBase.id}`}
               url={gibsBase.url_template}
               maxNativeZoom={gibsBase.max_native_zoom}
+              maxZoom={12}
               tileSize={256}
               className="satellite-imagery"
             />
@@ -86,8 +97,10 @@ export default function EnergyMap({
                 key={`gibs-ov-${layer.id}`}
                 url={layer.url_template}
                 maxNativeZoom={layer.max_native_zoom}
+                maxZoom={12}
                 tileSize={256}
-                opacity={layer.id === "viirs_thermal" ? 0.85 : 0.6}
+                opacity={0.85}
+                errorTileUrl={BLANK_TILE}
               />
             ))}
           </>

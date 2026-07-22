@@ -3,14 +3,14 @@
 import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
-import { X, Map as MapIcon, Share2, Satellite, Zap } from "lucide-react";
+import { X, Map as MapIcon, Share2, Satellite, Zap, Layers, Check } from "lucide-react";
 import { useNetwork, useIntelFeed, useSourceStatus, useSatelliteLayers } from "@/hooks/useChanakya";
 import { Panel, PanelHeader, MetricReadout } from "@/components/primitives";
 import { SourceTag } from "@/components/primitives/SourceTag";
 import { GraphView } from "./GraphView";
 import { CascadePanel } from "./CascadePanel";
 import type { MapMode, TwinSelection } from "./EnergyMap";
-import type { NetworkData, SourceStatus } from "@/lib/types";
+import type { NetworkData, SatelliteLayer, SourceStatus } from "@/lib/types";
 import { cn, fmtCompact } from "@/lib/utils";
 
 const EnergyMap = dynamic(() => import("./EnergyMap"), {
@@ -34,7 +34,16 @@ export function DigitalTwinRoom() {
   const [impacted, setImpacted] = useState<Record<string, string>>({});
   const [view, setView] = useState<View>("map");
   const [mapMode, setMapMode] = useState<MapMode>("operations");
+  const [baseLayer, setBaseLayer] = useState("blue_marble");
+  const [overlays, setOverlays] = useState<string[]>([]);
+  const [layersOpen, setLayersOpen] = useState(false);
   const sources = sourceData?.sources ?? [];
+  const satLayers = satellite?.layers ?? [];
+  const baseOptions = satLayers.filter((l) => l.kind === "base");
+  const overlayOptions = satLayers.filter((l) => l.kind === "overlay");
+  const effectiveBase = baseLayer || baseOptions[0]?.id || "";
+  const toggleOverlay = (id: string) =>
+    setOverlays((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const handleImpacted = useCallback((next: Record<string, string>) => setImpacted(next), []);
   const closeCascade = useCallback(() => {
     setCascadeSel(null);
@@ -63,10 +72,37 @@ export function DigitalTwinRoom() {
                 icon={<Satellite size={14} />}
                 label="Satellite"
               />
+              {mapMode === "satellite" && baseOptions.length > 0 && (
+                <ViewTab
+                  active={layersOpen}
+                  onClick={() => setLayersOpen((o) => !o)}
+                  icon={<Layers size={14} />}
+                  label="Imagery"
+                />
+              )}
             </>
           )}
         </Panel>
       </div>
+
+      {/* Imagery layer switcher (top-center dropdown) */}
+      {view === "map" && mapMode === "satellite" && layersOpen && baseOptions.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="absolute left-1/2 top-16 z-[600] w-[300px] -translate-x-1/2"
+        >
+          <LayerSwitcher
+            baseOptions={baseOptions}
+            overlayOptions={overlayOptions}
+            base={effectiveBase}
+            overlays={overlays}
+            date={satellite?.date}
+            onBase={setBaseLayer}
+            onToggleOverlay={toggleOverlay}
+          />
+        </motion.div>
+      )}
 
       {view === "graph" && <GraphView />}
       {view === "map" &&
@@ -78,6 +114,8 @@ export function DigitalTwinRoom() {
               events={feed?.events ?? []}
               mapMode={mapMode}
               satelliteLayers={satellite?.layers}
+              baseLayerId={effectiveBase}
+              overlayIds={overlays}
               impacted={impacted}
               onSelect={setSel}
             />
@@ -178,6 +216,84 @@ function ViewTab({
       {icon}
       {label}
     </button>
+  );
+}
+
+function LayerSwitcher({
+  baseOptions,
+  overlayOptions,
+  base,
+  overlays,
+  date,
+  onBase,
+  onToggleOverlay,
+}: {
+  baseOptions: SatelliteLayer[];
+  overlayOptions: SatelliteLayer[];
+  base: string;
+  overlays: string[];
+  date?: string;
+  onBase: (id: string) => void;
+  onToggleOverlay: (id: string) => void;
+}) {
+  return (
+    <Panel raised className="pointer-events-auto">
+      <PanelHeader eyebrow="NASA GIBS" title="Imagery" right={<span className="readout text-[10px] text-ink-dim">{date}</span>} />
+      <div className="space-y-3 p-3">
+        <div>
+          <div className="label-terminal mb-1.5">Base layer</div>
+          <div className="space-y-1">
+            {baseOptions.map((l) => (
+              <button
+                key={l.id}
+                onClick={() => onBase(l.id)}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded border px-2.5 py-1.5 text-left text-[11px] transition-colors",
+                  base === l.id
+                    ? "border-signal/40 bg-signal/10 text-signal"
+                    : "border-line bg-panel/60 text-ink-dim hover:text-ink",
+                )}
+              >
+                <span className="truncate">{l.label}</span>
+                {base === l.id && <Check size={13} className="shrink-0" />}
+              </button>
+            ))}
+          </div>
+        </div>
+        {overlayOptions.length > 0 && (
+          <div>
+            <div className="label-terminal mb-1.5">Overlays</div>
+            <div className="space-y-1">
+              {overlayOptions.map((l) => {
+                const on = overlays.includes(l.id);
+                return (
+                  <button
+                    key={l.id}
+                    onClick={() => onToggleOverlay(l.id)}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-2 rounded border px-2.5 py-1.5 text-left text-[11px] transition-colors",
+                      on
+                        ? "border-energy/40 bg-energy/10 text-energy"
+                        : "border-line bg-panel/60 text-ink-dim hover:text-ink",
+                    )}
+                  >
+                    <span className="truncate">{l.label}</span>
+                    <span
+                      className={cn(
+                        "grid h-3.5 w-3.5 shrink-0 place-items-center rounded-sm border",
+                        on ? "border-energy bg-energy/20" : "border-line",
+                      )}
+                    >
+                      {on && <Check size={10} />}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </Panel>
   );
 }
 

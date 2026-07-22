@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     # ---- Live data sources ----
     gdelt_enabled: bool = True
     open_meteo_enabled: bool = True
+    openweather_api_key: str = ""  # OpenWeatherMap; preferred over Open-Meteo when set
     eia_api_key: str = ""
     alpha_vantage_api_key: str = ""
     aisstream_api_key: str = ""

@@ -6,12 +6,25 @@ import { NesiSync } from "./NesiSync";
 /** The persistent command-center chrome wrapping every room. */
 export function CommandShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-void">
+    <div className="relative h-screen w-screen overflow-hidden bg-void text-[#e6edf7] font-sans">
       <NesiSync />
-      <NavRail />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <StatusBar />
-        <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+      
+      {/* Background Layer: Full-screen Workspace (Map) */}
+      <main className="absolute inset-0 z-0 overflow-hidden">
+        {children}
+      </main>
+
+      {/* Foreground Layer: Floating UI Chrome */}
+      <div className="pointer-events-none absolute inset-0 z-40 flex flex-col">
+        <div className="pointer-events-auto">
+          <StatusBar />
+        </div>
+        <div className="flex min-h-0 flex-1">
+          <div className="pointer-events-auto">
+            <NavRail />
+          </div>
+          {/* The rest of the screen allows pointer events to pass through to the map */}
+        </div>
       </div>
     </div>
   );

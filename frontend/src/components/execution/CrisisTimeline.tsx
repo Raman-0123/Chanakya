@@ -18,7 +18,6 @@ interface Stage {
   done: boolean;
 }
 
-/** Chronological, replayable operational history of the active crisis. */
 export function CrisisTimeline() {
   const { scenarioId, levers, activated } = useMission();
   const { data: sim } = useSimulation(scenarioId, levers);
@@ -41,8 +40,8 @@ export function CrisisTimeline() {
   ];
 
   return (
-    <Panel>
-      <PanelHeader eyebrow="Decision Timeline" title="Crisis Response History" />
+    <div className="tactical-panel select-none">
+      <PanelHeader eyebrow="Decision Timeline & Audit Trail" title="Crisis Response Sequence" />
       <div className="flex gap-4 overflow-x-auto p-4">
         {stages.map((s, i) => {
           const Icon = s.icon;
@@ -55,25 +54,30 @@ export function CrisisTimeline() {
               className="relative flex w-40 shrink-0 flex-col items-center text-center"
             >
               {i < stages.length - 1 && (
-                <div className={cn("absolute left-1/2 top-4 h-0.5 w-full", s.done ? "bg-signal/40" : "bg-line")} />
+                <div
+                  className={cn(
+                    "absolute left-1/2 top-4 h-0.5 w-full transition-colors",
+                    s.done ? "bg-[#00f0ff]/60 shadow-[0_0_8px_#00f0ff]" : "bg-[#1b2a4a]"
+                  )}
+                />
               )}
               <div
                 className={cn(
-                  "relative z-10 grid h-8 w-8 place-items-center rounded-full border",
+                  "relative z-10 grid h-8 w-8 place-items-center rounded-full border transition-all",
                   s.done
-                    ? "border-signal/50 bg-signal/10 text-signal"
-                    : "border-line bg-panel text-ink-dim",
+                    ? "border-[#00f0ff]/60 bg-[#00f0ff]/15 text-[#00f0ff] shadow-[0_0_12px_rgba(0,240,255,0.4)]"
+                    : "border-[#1b2a4a] bg-[#0c1220] text-[#5a677f]"
                 )}
               >
                 <Icon size={15} strokeWidth={1.75} />
               </div>
-              <div className="readout mt-1 text-[10px] text-ink-dim">{s.t}</div>
-              <div className="mt-0.5 text-xs font-medium leading-tight text-ink">{s.title}</div>
-              <div className="mt-0.5 text-[10px] leading-tight text-ink-muted">{s.detail}</div>
+              <div className="readout mt-1 font-mono text-[10px] text-[#00f0ff] font-bold">{s.t}</div>
+              <div className="mt-0.5 text-xs font-semibold leading-tight text-[#e6edf7] font-mono">{s.title}</div>
+              <div className="mt-0.5 text-[10px] leading-tight text-[#8b99b3]">{s.detail}</div>
             </motion.div>
           );
         })}
       </div>
-    </Panel>
+    </div>
   );
 }

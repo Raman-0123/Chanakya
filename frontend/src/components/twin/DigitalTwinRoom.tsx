@@ -62,13 +62,18 @@ export function DigitalTwinRoom() {
       {view === "graph" && <GraphView />}
       {view === "map" &&
         (network ? (
-          <EnergyMap
-            network={network}
-            vessels={feed?.vessels ?? []}
-            events={feed?.events ?? []}
-            mapMode={mapMode}
-            onSelect={setSel}
-          />
+          <>
+            <EnergyMap
+              network={network}
+              vessels={feed?.vessels ?? []}
+              events={feed?.events ?? []}
+              mapMode={mapMode}
+              onSelect={setSel}
+            />
+            {mapMode === "satellite" && (
+              <div className="satellite-overlay pointer-events-none" />
+            )}
+          </>
         ) : (
           <div className="grid h-full place-items-center blueprint">
             <span className="label-terminal animate-pulse">Loading network…</span>

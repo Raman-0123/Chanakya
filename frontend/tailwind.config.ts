@@ -10,20 +10,19 @@ const config: Config = {
     "./app/**/*.{ts,tsx}",
     "./src/**/*.{ts,tsx}",
   ],
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
-        // canvas
-        void: "#05070d",
-        base: "#0a0e17",
-        panel: "#0e1420",
-        "panel-raised": "#121a29",
-        line: "#1b2536",
-        "line-strong": "#26344a",
-        // text
-        ink: "#e6edf7",
-        "ink-muted": "#8b99b3",
-        "ink-dim": "#5a677f",
+        // semantic theme colors
+        canvas: "rgb(var(--bg-canvas) / <alpha-value>)",
+        panel: "rgb(var(--bg-panel) / <alpha-value>)",
+        "panel-hover": "rgb(var(--bg-panel-hover) / <alpha-value>)",
+        line: "rgb(var(--border-line) / <alpha-value>)",
+        "line-strong": "rgb(var(--border-strong) / <alpha-value>)",
+        ink: "rgb(var(--text-ink) / <alpha-value>)",
+        "ink-muted": "rgb(var(--text-muted) / <alpha-value>)",
+        "ink-dim": "rgb(var(--text-dim) / <alpha-value>)",
         // intelligence accent (cyan)
         signal: {
           DEFAULT: "#22d3ee",

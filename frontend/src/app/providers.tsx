@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
+import { ThemeProvider } from "next-themes";
 import { RealtimeBridge } from "@/components/shell/RealtimeBridge";
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -17,9 +18,11 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   );
   return (
-    <QueryClientProvider client={client}>
-      <RealtimeBridge />
-      {children}
-    </QueryClientProvider>
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+      <QueryClientProvider client={client}>
+        <RealtimeBridge />
+        {children}
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }

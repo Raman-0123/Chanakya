@@ -52,7 +52,7 @@ export default function EnergyMap({
       zoom={4}
       minZoom={3}
       maxZoom={7}
-      className={cn("h-full w-full bg-void", mapMode === "operations" && "map-tactical-filter")}
+      className={cn("h-full w-full bg-canvas", mapMode === "operations" && "map-tactical-filter")}
       worldCopyJump
       attributionControl={false}
     >
@@ -60,6 +60,7 @@ export default function EnergyMap({
         <TileLayer
           key="satellite"
           url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          className="satellite-imagery"
         />
       ) : (
         <TileLayer
@@ -243,7 +244,6 @@ export default function EnergyMap({
           )}
         </>
       )}
-
     </MapContainer>
   );
 }

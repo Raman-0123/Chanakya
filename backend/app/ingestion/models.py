@@ -169,7 +169,24 @@ class Vessel(BaseModel):
     origin: str | None = None
     destination: str | None = None
     cargo_kbbl: float | None = None
+    # recent breadcrumb track as [lat, lon] points, oldest→newest (for map trails)
+    track: list[list[float]] = Field(default_factory=list)
     source_kind: SourceKind = SourceKind.FALLBACK
+
+
+class SatelliteDetection(BaseModel):
+    """A NASA FIRMS thermal anomaly (fire/flare) near a monitored asset."""
+
+    id: str
+    lat: float
+    lon: float
+    brightness_k: float                  # brightness temperature, Kelvin
+    confidence: str = "nominal"          # low | nominal | high
+    acquired_at: str = ""
+    satellite: str = "VIIRS"
+    near_asset: str | None = None        # nearest corridor/port label
+    source: str = "NASA FIRMS"
+    source_kind: SourceKind = SourceKind.UNAVAILABLE
 
 
 class SanctionSignal(BaseModel):

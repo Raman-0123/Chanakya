@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.domain import SimulationEngine, build_energy_network
+from app.domain.assumptions import assumptions_report
 from app.domain.scenarios import (
     SCENARIO_CATALOG,
     ResponseLevers,
@@ -43,6 +44,16 @@ class CustomRunRequest(BaseModel):
 async def list_scenarios() -> list[dict]:
     """Catalog of triggerable / explorable crises."""
     return [s.model_dump() for s in SCENARIO_CATALOG]
+
+
+@router.get("/assumptions")
+async def model_assumptions() -> dict:
+    """Explicit, testable model-fidelity assumptions with a live self-audit.
+
+    Every structural and calibration assumption behind the scenario engine,
+    each checked against the running model right now (PASS/FAIL).
+    """
+    return assumptions_report(_network)
 
 
 @router.post("/run")

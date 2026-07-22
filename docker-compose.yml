@@ -31,7 +31,10 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: chanakya_dev_pw
       QDRANT_URL: http://qdrant:6333
-      OPERATOR_PIN: change-this-for-hosting
+      # Local dev PIN. For any hosted deployment set a strong OPERATOR_PIN in the
+      # environment (>=8 chars, not a placeholder) — /readyz blocks production
+      # readiness until it is. See .env.production.example.
+      OPERATOR_PIN: ${OPERATOR_PIN:-dev-local-pin}
     ports:
       - "8010:8010"
     depends_on:
@@ -71,7 +74,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chanakya_dev_pw}
       POSTGRES_DB: ${POSTGRES_DB:-chanakya}
     ports:
-      - "5432:5432"
+      - "5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -85,7 +88,7 @@ services:
     container_name: chanakya-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     healthcheck:

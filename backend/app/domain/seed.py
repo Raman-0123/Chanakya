@@ -34,8 +34,11 @@ def _corridors() -> list[ShippingCorridor]:
             reroute_corridor_id=None,
             reroute_added_days=0,
             reroute_cost_premium_pct=0,
-            path=[GeoPoint(lat=26.57, lon=56.25), GeoPoint(lat=20.5, lon=63.0),
-                  GeoPoint(lat=17.7, lon=71.0)],
+            # Gulf load points → Hormuz chokepoint → Arabian Sea → India west coast
+            path=[GeoPoint(lat=29.4, lon=48.9), GeoPoint(lat=26.57, lon=56.25),
+                  GeoPoint(lat=25.0, lon=57.8), GeoPoint(lat=22.5, lon=61.5),
+                  GeoPoint(lat=20.5, lon=66.0), GeoPoint(lat=18.9, lon=71.0)],
+            chokepoint_coords=GeoPoint(lat=26.57, lon=56.25),
         ),
         ShippingCorridor(
             id="red_sea",
@@ -46,8 +49,12 @@ def _corridors() -> list[ShippingCorridor]:
             reroute_corridor_id="cape",
             reroute_added_days=14,
             reroute_cost_premium_pct=38,
-            path=[GeoPoint(lat=30.0, lon=32.5), GeoPoint(lat=12.6, lon=43.3),
-                  GeoPoint(lat=15.0, lon=60.0), GeoPoint(lat=19.0, lon=71.0)],
+            # Suez → Red Sea → Bab-el-Mandeb → Gulf of Aden → Arabian Sea → India
+            path=[GeoPoint(lat=30.0, lon=32.5), GeoPoint(lat=27.0, lon=34.5),
+                  GeoPoint(lat=20.0, lon=38.5), GeoPoint(lat=12.6, lon=43.3),
+                  GeoPoint(lat=12.5, lon=51.0), GeoPoint(lat=15.0, lon=62.0),
+                  GeoPoint(lat=18.9, lon=71.0)],
+            chokepoint_coords=GeoPoint(lat=12.6, lon=43.3),
         ),
         ShippingCorridor(
             id="cape",
@@ -56,8 +63,11 @@ def _corridors() -> list[ShippingCorridor]:
             import_share=0.15,
             base_transit_days=32,
             reroute_corridor_id=None,
-            path=[GeoPoint(lat=-34.3, lon=18.5), GeoPoint(lat=-10.0, lon=55.0),
+            path=[GeoPoint(lat=6.0, lon=3.5), GeoPoint(lat=-25.0, lon=14.0),
+                  GeoPoint(lat=-34.83, lon=19.6), GeoPoint(lat=-30.0, lon=35.0),
+                  GeoPoint(lat=-10.0, lon=55.0), GeoPoint(lat=8.0, lon=68.0),
                   GeoPoint(lat=15.0, lon=72.0)],
+            chokepoint_coords=GeoPoint(lat=-34.83, lon=19.6),
         ),
         ShippingCorridor(
             id="malacca",
@@ -68,8 +78,10 @@ def _corridors() -> list[ShippingCorridor]:
             reroute_corridor_id=None,
             reroute_added_days=6,
             reroute_cost_premium_pct=12,
-            path=[GeoPoint(lat=1.4, lon=103.8), GeoPoint(lat=8.0, lon=90.0),
+            path=[GeoPoint(lat=1.4, lon=103.8), GeoPoint(lat=3.0, lon=99.5),
+                  GeoPoint(lat=6.0, lon=95.0), GeoPoint(lat=9.0, lon=88.0),
                   GeoPoint(lat=13.0, lon=80.3)],
+            chokepoint_coords=GeoPoint(lat=1.9, lon=101.3),
         ),
     ]
 

@@ -10,12 +10,14 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 
+from app.ingestion.firms import fetch_firms
 from app.ingestion.gdelt import fetch_gdelt_events
 from app.ingestion.models import (
     Evidence,
     IntelEvent,
     PriceQuote,
     SanctionSignal,
+    SatelliteDetection,
     SignalCategory,
     SourceKind,
     Vessel,
@@ -70,13 +72,34 @@ def _sanctions_to_events(sigs: list[SanctionSignal]) -> list[IntelEvent]:
     ]
 
 
+def _satellite_to_events(dets: list[SatelliteDetection]) -> list[IntelEvent]:
+    """Promote high-confidence thermal anomalies near assets to intel events."""
+    events: list[IntelEvent] = []
+    for d in dets:
+        if d.confidence != "high" or not d.near_asset:
+            continue
+        events.append(IntelEvent(
+            id=make_id("firms", d.id),
+            title=f"Thermal anomaly near {d.near_asset}",
+            summary=(f"{d.satellite} detected a high-confidence thermal signature "
+                     f"({d.brightness_k:.0f} K) close to {d.near_asset}."),
+            category=SignalCategory.SATELLITE,
+            severity="high", confidence=80, risk_score=60,
+            lat=d.lat, lon=d.lon, source=d.source, source_kind=d.source_kind,
+            evidence=[Evidence(label="Brightness", detail=f"{d.brightness_k:.0f} K"),
+                      Evidence(label="Acquired", detail=d.acquired_at)],
+        ))
+    return events
+
+
 class IntelligenceFeed:
-    def __init__(self, events, prices, weather, vessels, sanctions):
+    def __init__(self, events, prices, weather, vessels, sanctions, detections=None):
         self.events: list[IntelEvent] = events
         self.prices: list[PriceQuote] = prices
         self.weather: list[WeatherObs] = weather
         self.vessels: list[Vessel] = vessels
         self.sanctions: list[SanctionSignal] = sanctions
+        self.detections: list[SatelliteDetection] = detections or []
 
     def summary(self) -> dict:
         sev = Counter(e.severity for e in self.events)
@@ -102,13 +125,14 @@ class IntelligenceFeed:
 
 class IntelligenceService:
     async def feed(self) -> IntelligenceFeed:
-        geo, prices, weather, vessels, sanctions = await asyncio.gather(
+        geo, prices, weather, vessels, sanctions, detections = await asyncio.gather(
             fetch_gdelt_events(), fetch_prices(), fetch_weather(),
-            fetch_vessels(), fetch_sanctions(),
+            fetch_vessels(), fetch_sanctions(), fetch_firms(),
         )
-        events = geo + _weather_to_events(weather) + _sanctions_to_events(sanctions)
+        events = (geo + _weather_to_events(weather) + _sanctions_to_events(sanctions)
+                  + _satellite_to_events(detections))
         events.sort(key=lambda e: e.risk_score, reverse=True)
-        return IntelligenceFeed(events, prices, weather, vessels, sanctions)
+        return IntelligenceFeed(events, prices, weather, vessels, sanctions, detections)
 
 
 _service = IntelligenceService()

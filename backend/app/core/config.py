@@ -81,6 +81,18 @@ class Settings(BaseSettings):
         return self.environment.lower() == "production"
 
     @property
+    def operator_pin_is_weak(self) -> bool:
+        """True if the operator PIN is unset or a known placeholder/dev value.
+
+        Mission activation is gated on this PIN, so a weak one is a real security
+        gap in a hosted deployment — surfaced in /readyz and blocking readiness
+        in production.
+        """
+        weak = {"", "change-this-for-hosting", "dev-local-pin", "changeme",
+                "password", "0000", "1234"}
+        return self.operator_pin.strip().lower() in weak or len(self.operator_pin.strip()) < 8
+
+    @property
     def configured_llm_providers(self) -> list[str]:
         """Providers that have a key set, primary first."""
         available = {

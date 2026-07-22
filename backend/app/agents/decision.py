@@ -11,6 +11,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from app.domain.engine import SimulationEngine
+from app.domain.logistics import assess_logistics
 from app.domain.scenarios import ResponseLevers, ScenarioSpec
 from app.db import get_repositories
 from app.core.logging import get_logger
@@ -39,6 +40,13 @@ class ProcurementAlternative(BaseModel):
     capacity_constraint: str
     confidence: float
     feasible: bool
+    # logistics realism (tanker availability, port congestion, war-risk)
+    port_congestion_days: float = 0.0
+    charter_delay_days: float = 0.0
+    tanker_status: str = "available"
+    war_risk_premium_usd_bbl: float = 0.0
+    landed_premium_usd_bbl: float = 0.0
+    logistics_notes: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
 
 
@@ -159,15 +167,25 @@ def build_procurement_alternatives(
             reasons.append("sanctions constraint")
         if not compatible:
             reasons.append("no grade-compatible refinery")
+        logi = assess_logistics(
+            engine.net, supplier, corridor, compatible, receiving_capacity,
+            spec, affected,
+        )
         alternatives.append(ProcurementAlternative(
             supplier_id=supplier.id, supplier=supplier.country,
             crude_grade=supplier.grade.value,
             compatible_refineries=[refinery.name for refinery in compatible[:6]],
             volume_kbpd=round(volume, 1),
             route=corridor.name if corridor else supplier.corridor_id,
-            eta_days=round(corridor.base_transit_days if corridor else 14),
-            transit_delay_days=0.0,
+            eta_days=logi.eta_days,
+            transit_delay_days=logi.transit_delay_days,
             estimated_premium_usd_bbl=supplier.spot_premium_usd,
+            port_congestion_days=logi.port_congestion_days,
+            charter_delay_days=logi.charter_delay_days,
+            tanker_status=logi.tanker_status,
+            war_risk_premium_usd_bbl=logi.war_risk_premium_usd_bbl,
+            landed_premium_usd_bbl=logi.landed_premium_usd_bbl,
+            logistics_notes=logi.notes,
             capacity_constraint=("; ".join(reasons) if reasons else
                                  f"Supplier {supplier.spare_capacity_kbpd:,.0f}; "
                                  f"compatible refining {compatible_capacity:,.0f}; "
@@ -177,6 +195,8 @@ def build_procurement_alternatives(
             evidence=[
                 "Supplier capacity and grade from CHANAKYA versioned baseline.",
                 "Route feasibility evaluated against the active scenario shock.",
+                f"ETA {logi.eta_days}d incl. {logi.transit_delay_days:.1f}d friction; "
+                f"landed +${logi.landed_premium_usd_bbl:.1f}/bbl.",
             ],
         ))
     alternatives.sort(key=lambda item: (not item.feasible, -item.confidence,

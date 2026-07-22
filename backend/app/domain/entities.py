@@ -56,6 +56,8 @@ class ShippingCorridor(BaseModel):
     reroute_cost_premium_pct: float = 0.0  # % added freight cost when rerouting
     status: InfraStatus = InfraStatus.OPERATIONAL
     path: list[GeoPoint] = Field(default_factory=list)
+    # precise chokepoint location for the geospatial layer (map marker + FIRMS)
+    chokepoint_coords: GeoPoint | None = None
 
 
 class Supplier(BaseModel):

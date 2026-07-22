@@ -33,6 +33,27 @@ def _interp(a: dict, b: dict, t: float) -> tuple[float, float]:
             a["lon"] + (b["lon"] - a["lon"]) * t)
 
 
+def _trailing_track(path: list[dict], seg: int, t: float,
+                    jlat: float, jlon: float, points: int = 5) -> list[list[float]]:
+    """Recent breadcrumb positions behind the vessel, oldest→newest.
+
+    Walks backwards along the corridor path from the vessel's current position so
+    the map can draw a realistic wake trail toward India.
+    """
+    trail: list[list[float]] = []
+    step = 0.16  # fraction of a segment between breadcrumbs
+    for i in range(points, 0, -1):
+        back = i * step
+        s, tt = seg, t - back
+        while tt < 0 and s > 0:  # roll back into the previous segment
+            s -= 1
+            tt += 1.0
+        tt = max(0.0, tt)
+        lat, lon = _interp(path[s], path[s + 1], tt)
+        trail.append([round(lat + jlat, 3), round(lon + jlon, 3)])
+    return trail
+
+
 def synthetic_vessels(per_corridor: int = 4, seed: int = 7) -> list[Vessel]:
     rng = random.Random(seed)
     vessels: list[Vessel] = []
@@ -48,9 +69,11 @@ def synthetic_vessels(per_corridor: int = 4, seed: int = 7) -> list[Vessel]:
             seg = rng.randint(0, len(path) - 2)
             t = rng.random()
             lat, lon = _interp(path[seg], path[seg + 1], t)
-            lat += rng.uniform(-0.4, 0.4)
-            lon += rng.uniform(-0.4, 0.4)
+            jitter_lat, jitter_lon = rng.uniform(-0.4, 0.4), rng.uniform(-0.4, 0.4)
+            lat += jitter_lat
+            lon += jitter_lon
             disrupted = corr.status.value != "operational"
+            track = _trailing_track(path, seg, t, jitter_lat, jitter_lon)
             vessels.append(Vessel(
                 id=f"v{n:03d}",
                 name=rng.choice(_TANKER_NAMES),
@@ -59,6 +82,7 @@ def synthetic_vessels(per_corridor: int = 4, seed: int = 7) -> list[Vessel]:
                 speed_kn=0.0 if disrupted else round(rng.uniform(9, 15), 1),
                 corridor_id=corr.id, origin=origin, destination="India (west coast)",
                 cargo_kbbl=round(rng.uniform(600, 2000), 0),
+                track=track,
                 source_kind=SourceKind.REPLAY,
             ))
             n += 1

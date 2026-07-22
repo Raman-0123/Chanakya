@@ -32,6 +32,25 @@ class Disagreement(BaseModel):
     positions: list[dict]
 
 
+class LatencyProfile(BaseModel):
+    """End-to-end response time from triggering signal to recommendation.
+
+    `total_pipeline_ms` is the processing latency CHANAKYA itself adds (context
+    build + graph execution). `signal_age_seconds` is how old the freshest
+    contributing signal was when the recommendation was produced, so
+    `end_to_end_seconds` is the full observed-signal → recommendation time the
+    rubric grades on.
+    """
+
+    context_build_ms: int = 0
+    graph_execution_ms: int = 0
+    total_pipeline_ms: int = 0
+    triggering_signal_at: str | None = None
+    signal_age_seconds: float | None = None
+    recommendation_at: str = ""
+    end_to_end_seconds: float = 0.0
+
+
 class WorkflowStep(BaseModel):
     node: str
     label: str
@@ -54,6 +73,7 @@ class CouncilResult(BaseModel):
     workflow_run_id: str
     workflow_trace: list[WorkflowStep] = Field(default_factory=list)
     mission_id: str | None = None
+    latency: LatencyProfile | None = None
     schema_version: str = "1.0"
     provenance: dict = Field(default_factory=dict)
 
@@ -159,12 +179,16 @@ class Council:
                   "high" if severity.get("high") else
                   "elevated" if severity.get("elevated") else "nominal")
         provenance = Counter(row.get("provenance", "unavailable") for row in rows)
+        observed_times = [row.get("observed_at") for row in rows if row.get("observed_at")]
         summary = {
             "threat_level": threat, "event_count": len(rows),
             "corridors_flagged": dict(corridors),
             "peak_risk_score": max((row.get("risk_score", 0) for row in rows), default=0),
             "is_live": bool(provenance.get(SourceKind.LIVE.value)),
             "provenance": dict(provenance),
+            # ISO-8601 UTC strings sort chronologically — freshest is the max.
+            "freshest_signal_at": max(observed_times) if observed_times else None,
+            "oldest_signal_at": min(observed_times) if observed_times else None,
         }
         top = [{"title": row.get("title"), "severity": row.get("severity"),
                 "affected_corridors": row.get("affected_corridors", []),
@@ -183,12 +207,17 @@ class Council:
         spec = get_scenario(scenario_id)
         if not spec:
             raise ValueError(f"Unknown scenario '{scenario_id}'")
+        ctx_t0 = time.monotonic()
         ctx = await self._build_context(spec, levers)
+        context_build_ms = int((time.monotonic() - ctx_t0) * 1000)
         run_id = f"wf-{uuid4().hex[:12]}"
+        graph_t0 = time.monotonic()
         state = await self._graph.ainvoke(
             {"context": ctx, "spec": spec, "assessments": []},
             config={"configurable": {"thread_id": run_id}},
         )
+        graph_execution_ms = int((time.monotonic() - graph_t0) * 1000)
+        latency = _build_latency(ctx, context_build_ms, graph_execution_ms)
         assessments = state.get("assessments", [])
         strategies = state.get("strategies", [])
         workflow_trace = state.get("workflow_trace", [])
@@ -201,7 +230,7 @@ class Council:
             strategies=strategies, disagreements=state.get("disagreements", []),
             consensus_confidence=consensus, reasoning_mode=mode,
             recommended_strategy_id=recommended, workflow_run_id=run_id,
-            workflow_trace=workflow_trace,
+            workflow_trace=workflow_trace, latency=latency,
             provenance={"events": ctx.intel_summary.get("provenance", {}),
                         "evidence_documents": len(ctx.retrieved_evidence)},
         )
@@ -221,6 +250,35 @@ class Council:
                 **persisted, "result": result.model_dump(mode="json"),
             })
         return result
+
+
+def _build_latency(
+    ctx: CouncilContext, context_build_ms: int, graph_execution_ms: int
+) -> LatencyProfile:
+    """Assemble the signal→recommendation latency profile for this run."""
+    recommendation_at = datetime.now(timezone.utc)
+    total_pipeline_ms = context_build_ms + graph_execution_ms
+    freshest = ctx.intel_summary.get("freshest_signal_at")
+    signal_age_seconds: float | None = None
+    if freshest:
+        try:
+            observed = datetime.fromisoformat(freshest)
+            if observed.tzinfo is None:
+                observed = observed.replace(tzinfo=timezone.utc)
+            signal_age_seconds = max(0.0, (recommendation_at - observed).total_seconds())
+        except (ValueError, TypeError):
+            signal_age_seconds = None
+    end_to_end_seconds = (signal_age_seconds if signal_age_seconds is not None
+                          else round(total_pipeline_ms / 1000, 3))
+    return LatencyProfile(
+        context_build_ms=context_build_ms,
+        graph_execution_ms=graph_execution_ms,
+        total_pipeline_ms=total_pipeline_ms,
+        triggering_signal_at=freshest,
+        signal_age_seconds=round(signal_age_seconds, 1) if signal_age_seconds is not None else None,
+        recommendation_at=recommendation_at.isoformat(),
+        end_to_end_seconds=round(end_to_end_seconds, 1),
+    )
 
 
 def _detect_disagreements(assessments: list[AgentAssessment]) -> list[Disagreement]:

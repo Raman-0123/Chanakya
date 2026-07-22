@@ -62,6 +62,7 @@ async def health() -> dict:
         "data_sources": {
             "gdelt": settings.gdelt_enabled,
             "open_meteo": settings.open_meteo_enabled,
+            "openweather": bool(settings.openweather_api_key),
             "eia": bool(settings.eia_api_key),
             "alpha_vantage": bool(settings.alpha_vantage_api_key),
             "aisstream": bool(settings.aisstream_api_key),

@@ -41,6 +41,8 @@ class Settings(BaseSettings):
 
     # ---- LLM providers ----
     llm_primary_provider: str = "groq"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-opus-4-8"
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
     gemini_api_key: str = ""
@@ -97,6 +99,7 @@ class Settings(BaseSettings):
     def configured_llm_providers(self) -> list[str]:
         """Providers that have a key set, primary first."""
         available = {
+            "anthropic": bool(self.anthropic_api_key),
             "groq": bool(self.groq_api_key),
             "gemini": bool(self.gemini_api_key),
             "nvidia": bool(self.nvidia_api_key),

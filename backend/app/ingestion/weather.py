@@ -1,7 +1,9 @@
-"""Open-Meteo adapter — keyless weather at chokepoints & Indian ports.
+"""Weather adapter — wind/wave at chokepoints & Indian ports.
 
-Wind + wave observations become a shipping-risk band, feeding weather-driven
-disruption signals (e.g. cyclone risk over western terminals).
+Uses OpenWeatherMap when OPENWEATHER_API_KEY is set (preferred), otherwise the
+keyless Open-Meteo API; if the primary provider fails it falls back to the other,
+then to a synthetic baseline. Observations become a shipping-risk band, feeding
+weather-driven disruption signals (e.g. cyclone risk over western terminals).
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ import asyncio
 
 import httpx
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.ingestion.cache import cache_get, cache_set
 from app.ingestion.models import SourceKind, WeatherObs
@@ -18,6 +21,7 @@ log = get_logger("ingestion.weather")
 
 _FORECAST = "https://api.open-meteo.com/v1/forecast"
 _MARINE = "https://marine-api.open-meteo.com/v1/marine"
+_OPENWEATHER = "https://api.openweathermap.org/data/2.5/weather"
 _TTL = 1800
 
 # id, name, lat, lon
@@ -75,16 +79,52 @@ async def _one(client: httpx.AsyncClient, loc: tuple) -> WeatherObs:
     )
 
 
+async def _one_openweather(client: httpx.AsyncClient, loc: tuple) -> WeatherObs:
+    lid, name, lat, lon = loc
+    r = await client.get(_OPENWEATHER, params={
+        "lat": lat, "lon": lon, "appid": settings.openweather_api_key, "units": "metric",
+    })
+    r.raise_for_status()
+    data = r.json()
+    wind_ms = float((data.get("wind") or {}).get("speed", 0.0))
+    wind_kph = round(wind_ms * 3.6, 1)  # OpenWeather reports wind in m/s
+    w0 = (data.get("weather") or [{}])[0]
+    wid = int(w0.get("id", 800))
+    desc = str(w0.get("main", "Clear")).lower()
+    # OpenWeather has no wave data on the free current-weather endpoint
+    condition = ("storm" if wid < 300 or wind_kph >= 62
+                 else "rough" if wind_kph >= 45 else desc)
+    return WeatherObs(
+        location_id=lid, location_name=name, lat=lat, lon=lon,
+        wind_kph=wind_kph, wave_m=None, condition=condition,
+        shipping_risk=_risk(wind_kph, None), source_kind=SourceKind.LIVE,
+    )
+
+
+async def _gather(fetch_one) -> list[WeatherObs]:
+    async with httpx.AsyncClient(timeout=10) as client:
+        return list(await asyncio.gather(*[fetch_one(client, loc) for loc in _LOCATIONS]))
+
+
 async def fetch_weather() -> list[WeatherObs]:
     cached = await cache_get("weather:obs")
     if cached:
         return [WeatherObs(**{**w, "source_kind": SourceKind.CACHED}) for w in cached]
+    use_openweather = bool(settings.openweather_api_key)
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            obs = await asyncio.gather(*[_one(client, loc) for loc in _LOCATIONS])
+        obs = await _gather(_one_openweather if use_openweather else _one)
     except Exception as exc:  # noqa: BLE001
-        log.warning("weather.fetch_failed", error=str(exc))
-        return _fallback()
+        log.warning("weather.fetch_failed",
+                    provider="openweather" if use_openweather else "open-meteo",
+                    error=str(exc))
+        # if the preferred provider failed, try the other keyless one before giving up
+        try:
+            obs = await _gather(_one) if use_openweather else _fallback()
+            if not use_openweather:
+                return obs  # already the synthetic baseline
+        except Exception as exc2:  # noqa: BLE001
+            log.warning("weather.fallback_failed", error=str(exc2))
+            return _fallback()
     await cache_set("weather:obs", [o.model_dump(mode="json") for o in obs], _TTL)
     return list(obs)
 

@@ -6,7 +6,7 @@ import { NesiSync } from "./NesiSync";
 /** The persistent command-center chrome wrapping every room. */
 export function CommandShell({ children }: { children: ReactNode }) {
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-void text-[#e6edf7] font-sans">
+    <div className="relative h-screen w-screen overflow-hidden bg-canvas text-ink font-sans transition-colors duration-300">
       <NesiSync />
       
       {/* Background Layer: Full-screen Workspace (Map) */}

@@ -73,12 +73,12 @@ export function ExecutionRoom() {
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-4 blueprint select-none">
       {/* Header Banner */}
-      <div className="tactical-panel flex items-center justify-between px-4 py-3 bg-[#080d1a]/95">
+      <div className="tactical-panel flex items-center justify-between px-4 py-3 bg-panel/95">
         <div>
-          <div className="label-terminal font-bold text-[#00f0ff]">Mission Execution Deck · {scenarioName}</div>
-          <div className="text-base font-bold text-[#e6edf7] font-mono">{titleLine}</div>
-          <div className="mt-0.5 text-[9px] uppercase tracking-[0.2em] text-[#5a677f] font-mono flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#00f0ff] animate-pulse" />
+          <div className="label-terminal font-bold text-signal">Mission Execution Deck · {scenarioName}</div>
+          <div className="text-base font-bold text-ink font-mono">{titleLine}</div>
+          <div className="mt-0.5 text-[9px] uppercase tracking-[0.2em] text-ink-dim font-mono flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-signal animate-pulse" />
             STATUS: {sourceLabel}
           </div>
         </div>
@@ -89,8 +89,8 @@ export function ExecutionRoom() {
           className={cn(
             "flex items-center gap-2 rounded px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider transition-all",
             activated
-              ? "border border-emerald-500/50 bg-emerald-500/15 text-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.3)]"
-              : "border border-[#00f0ff]/50 bg-[#00f0ff]/15 text-[#00f0ff] hover:bg-[#00f0ff]/25 shadow-[0_0_16px_rgba(0,240,255,0.3)] disabled:opacity-40",
+              ? "border border-emerald-500/50 bg-emerald-500/15 text-emerald-500 shadow-glow-nominal"
+              : "border border-signal/50 bg-signal/15 text-signal hover:bg-signal/25 shadow-glow-signal disabled:opacity-40",
           )}
         >
           <Rocket size={15} />
@@ -116,15 +116,15 @@ export function ExecutionRoom() {
       ) : councilLoading || missionLoading ? (
         <div className="tactical-panel grid flex-1 place-items-center p-8">
           <div className="text-center font-mono">
-            <div className="text-sm font-bold text-[#00f0ff] animate-pulse">Generating Mission Playbook…</div>
-            <p className="mt-1 text-xs text-[#8b99b3]">
+            <div className="text-sm font-bold text-signal animate-pulse">Generating Mission Playbook…</div>
+            <p className="mt-1 text-xs text-ink-muted">
               Synthesizing agent council consensus and persisted mission parameters.
             </p>
           </div>
         </div>
       ) : (
         <div className="tactical-panel grid flex-1 place-items-center p-8">
-          <p className="text-xs font-mono text-[#8b99b3]">
+          <p className="text-xs font-mono text-ink-muted">
             No mission record exists for this scenario yet. Run the Decision Center to generate
             one, then return here to activate playback.
           </p>
@@ -159,7 +159,7 @@ function MissionChecklist({ strategy, activated }: { strategy: StrategyOption; a
   return (
     <div className="tactical-panel">
       <PanelHeader eyebrow="Operational Playbook" title="Action Checklist & Inter-Agency Sequence" />
-      <div className="divide-y divide-[#1b2a4a]">
+      <div className="divide-y divide-line">
         {strategy.implementation_steps.map((step, i) => {
           const state = !activated ? "pending" : i < done ? "done" : i === done ? "active" : "pending";
           return (
@@ -168,32 +168,32 @@ function MissionChecklist({ strategy, activated }: { strategy: StrategyOption; a
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.05 }}
-              className="flex items-start gap-3 px-4 py-3 hover:bg-[#0c1220]/50 transition-colors"
+              className="flex items-start gap-3 px-4 py-3 hover:bg-panel-hover transition-colors"
             >
               <span className="mt-0.5">
                 {state === "done" ? (
-                  <CheckCircle2 size={16} className="text-emerald-400" />
+                  <CheckCircle2 size={16} className="text-emerald-500" />
                 ) : state === "active" ? (
-                  <Loader2 size={16} className="animate-spin text-[#00f0ff]" />
+                  <Loader2 size={16} className="animate-spin text-signal" />
                 ) : (
-                  <Circle size={16} className="text-[#5a677f]" />
+                  <Circle size={16} className="text-ink-dim" />
                 )}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-[#e6edf7] font-mono">{step}</div>
+                <div className="text-xs font-semibold text-ink font-mono">{step}</div>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="rounded bg-[#0c1220] border border-[#1b2a4a] px-2 py-0.5 font-mono text-[10px] uppercase text-[#00f0ff] font-bold">
+                  <span className="rounded bg-panel border border-line px-2 py-0.5 font-mono text-[10px] uppercase text-signal font-bold">
                     {agencyFor(step)}
                   </span>
                   <span
                     className={cn(
                       "font-mono text-[10px] font-bold px-1.5 py-0.2 rounded",
-                      i === 0 ? "bg-red-950/60 text-red-400 border border-red-800/40" : i <= 2 ? "bg-amber-950/60 text-amber-400 border border-amber-800/40" : "bg-[#0c1220] text-[#8b99b3]",
+                      i === 0 ? "bg-red-950/60 text-red-500 border border-red-800/40" : i <= 2 ? "bg-amber-950/60 text-amber-500 border border-amber-800/40" : "bg-panel text-ink-muted",
                     )}
                   >
                     {priorityFor(i)}
                   </span>
-                  <span className="font-mono text-[10px] uppercase text-[#5a677f]">{state}</span>
+                  <span className="font-mono text-[10px] uppercase text-ink-dim">{state}</span>
                 </div>
               </div>
             </motion.div>
@@ -239,7 +239,7 @@ function BriefingPack({ strategy, scenario }: { strategy: StrategyOption; scenar
       <PanelHeader
         eyebrow="Mission Report Generator"
         title="Executive Briefing Pack"
-        right={<FileText size={15} className="text-[#00f0ff]" />}
+        right={<FileText size={15} className="text-signal" />}
       />
       <div className="space-y-2.5 p-4">
         {briefs.map((b, i) => (
@@ -248,13 +248,13 @@ function BriefingPack({ strategy, scenario }: { strategy: StrategyOption; scenar
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.08 }}
-            className="rounded border border-[#1b2a4a] bg-[#0c1220]/80 p-3 hover:border-[#00f0ff]/40 transition-colors"
+            className="rounded border border-line bg-panel-hover/80 p-3 hover:border-signal/40 transition-colors"
           >
-            <div className="mb-1 flex items-center justify-between text-xs font-bold text-[#00f0ff] font-mono">
+            <div className="mb-1 flex items-center justify-between text-xs font-bold text-signal font-mono">
               <span>{b.title}</span>
-              <Download size={13} className="text-[#5a677f] hover:text-[#00f0ff] cursor-pointer" />
+              <Download size={13} className="text-ink-dim hover:text-signal cursor-pointer" />
             </div>
-            <p className="text-xs leading-relaxed text-[#8b99b3] font-sans">{b.body}</p>
+            <p className="text-xs leading-relaxed text-ink-muted font-sans">{b.body}</p>
           </motion.div>
         ))}
       </div>

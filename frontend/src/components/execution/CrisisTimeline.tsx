@@ -57,7 +57,7 @@ export function CrisisTimeline() {
                 <div
                   className={cn(
                     "absolute left-1/2 top-4 h-0.5 w-full transition-colors",
-                    s.done ? "bg-[#00f0ff]/60 shadow-[0_0_8px_#00f0ff]" : "bg-[#1b2a4a]"
+                    s.done ? "bg-signal/60 shadow-glow-signal" : "bg-line"
                   )}
                 />
               )}
@@ -65,15 +65,15 @@ export function CrisisTimeline() {
                 className={cn(
                   "relative z-10 grid h-8 w-8 place-items-center rounded-full border transition-all",
                   s.done
-                    ? "border-[#00f0ff]/60 bg-[#00f0ff]/15 text-[#00f0ff] shadow-[0_0_12px_rgba(0,240,255,0.4)]"
-                    : "border-[#1b2a4a] bg-[#0c1220] text-[#5a677f]"
+                    ? "border-signal/60 bg-signal/15 text-signal shadow-glow-signal"
+                    : "border-line bg-panel-hover text-ink-dim"
                 )}
               >
                 <Icon size={15} strokeWidth={1.75} />
               </div>
-              <div className="readout mt-1 font-mono text-[10px] text-[#00f0ff] font-bold">{s.t}</div>
-              <div className="mt-0.5 text-xs font-semibold leading-tight text-[#e6edf7] font-mono">{s.title}</div>
-              <div className="mt-0.5 text-[10px] leading-tight text-[#8b99b3]">{s.detail}</div>
+              <div className="readout mt-1 font-mono text-[10px] text-signal font-bold">{s.t}</div>
+              <div className="mt-0.5 text-xs font-semibold leading-tight text-ink font-mono">{s.title}</div>
+              <div className="mt-0.5 text-[10px] leading-tight text-ink-muted">{s.detail}</div>
             </motion.div>
           );
         })}

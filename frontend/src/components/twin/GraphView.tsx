@@ -161,12 +161,51 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
       rawEdges = baseGraph.edges;
     }
 
+    // Auto-balance node positions into a wide horizontal matrix per node type to prevent tall narrow vertical stacking
+    const nodesByType: Record<string, any[]> = {};
+    rawNodes.forEach((n) => {
+      const t = n.type || "entity";
+      if (!nodesByType[t]) nodesByType[t] = [];
+      nodesByType[t].push(n);
+    });
+
+    const typeOrder = ["supplier", "event", "corridor", "port", "reserve", "refinery", "vessel", "country", "pipeline", "agency", "indicator", "entity"];
+    const activeTypes = Object.keys(nodesByType).sort((a, b) => {
+      const idxA = typeOrder.indexOf(a);
+      const idxB = typeOrder.indexOf(b);
+      return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+    });
+
+    let currentX = 50;
+    const layoutNodesMap = new Map<string, { x: number; y: number }>();
+
+    activeTypes.forEach((type) => {
+      const items = nodesByType[type];
+      const count = items.length;
+      // Cap height at max 10 rows per column to keep aspect ratio wide & landscape
+      const maxRows = Math.min(10, Math.ceil(Math.sqrt(count * 2.5)));
+      const subCols = Math.ceil(count / maxRows);
+
+      items.forEach((n, i) => {
+        const colIdx = i % subCols;
+        const rowIdx = Math.floor(i / subCols);
+        layoutNodesMap.set(n.id, {
+          x: currentX + colIdx * 190,
+          y: rowIdx * 85 + 60,
+        });
+      });
+
+      currentX += subCols * 190 + 140; // Spacing between entity layers
+    });
+
     const flowNodes: Node[] = rawNodes.map((n) => {
       const color = getNodeColor(n.type, n.meta);
       const isSelected = selectedNodeDetail?.id === n.id || selectedEntityId === n.id;
+      const pos = layoutNodesMap.get(n.id) || n.position || { x: 100, y: 100 };
+
       return {
         id: n.id,
-        position: n.position || { x: 100, y: 100 },
+        position: pos,
         data: {
           label: (
             <div className="text-left">
@@ -183,7 +222,7 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
           ),
         },
         style: {
-          background: isSelected ? "#172234" : "#0e1420",
+          background: isSelected ? "var(--bg-panel-hover)" : "var(--bg-panel)",
           border: isSelected ? `2px solid ${color}` : `1px solid ${color}66`,
           borderRadius: 8,
           padding: "6px 10px",
@@ -201,14 +240,14 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
         source: e.source,
         target: e.target,
         label: showEdgeLabels ? e.label : undefined,
-        labelStyle: { fill: "#8b99b3", fontSize: 9, fontWeight: 500 },
-        labelBgStyle: { fill: "#0a0f18", fillOpacity: 0.8 },
+        labelStyle: { fill: "var(--text-muted)", fontSize: 9, fontWeight: 500 },
+        labelBgStyle: { fill: "var(--bg-canvas)", fillOpacity: 0.8 },
         animated: threat,
         style: {
-          stroke: threat ? "#ef4444" : "#26344a",
+          stroke: threat ? "#ef4444" : "var(--border-strong)",
           strokeWidth: threat ? 1.75 : 1,
         },
-        markerEnd: { type: MarkerType.ArrowClosed, color: threat ? "#ef4444" : "#26344a" },
+        markerEnd: { type: MarkerType.ArrowClosed, color: threat ? "#ef4444" : "var(--border-strong)" },
       };
     });
 
@@ -350,7 +389,7 @@ export function GraphView({ forceExploreId }: { forceExploreId?: string }) {
         nodesDraggable
         nodesConnectable={false}
       >
-        <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="#1b2536" />
+        <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="var(--border-line)" />
         <Controls className="!border-line !bg-panel" />
       </ReactFlow>
 

@@ -16,7 +16,7 @@ export function MetricReadout({
   value,
   unit,
   delta,
-  accent = "#e6edf7",
+  accent = "var(--text-ink)",
   className,
 }: MetricReadoutProps) {
   const deltaColor =

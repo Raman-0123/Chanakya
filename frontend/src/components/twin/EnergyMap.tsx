@@ -2,9 +2,17 @@
 
 import "leaflet/dist/leaflet.css";
 import { MapContainer, TileLayer, Polyline, CircleMarker, Tooltip } from "react-leaflet";
-import type { IntelEvent, NetworkData, Vessel } from "@/lib/types";
+import type { IntelEvent, NetworkData, SatelliteLayer, Vessel } from "@/lib/types";
 import { SEVERITY_META } from "@/lib/severity";
 import { cn } from "@/lib/utils";
+
+const CASCADE_COLOR: Record<string, string> = {
+  offline: "#ef4444",
+  critical: "#f97316",
+  strained: "#eab308",
+  elevated: "#eab308",
+  nominal: "#10b981",
+};
 
 export interface TwinSelection {
   kind: "refinery" | "port" | "supplier" | "reserve" | "corridor";
@@ -34,6 +42,8 @@ export default function EnergyMap({
   mapMode,
   scenarioId,
   activated,
+  satelliteLayers,
+  impacted,
   onSelect,
 }: {
   network: NetworkData;
@@ -42,9 +52,13 @@ export default function EnergyMap({
   mapMode: MapMode;
   scenarioId?: string;
   activated?: boolean;
+  satelliteLayers?: SatelliteLayer[];
+  impacted?: Record<string, string>;
   onSelect: (sel: TwinSelection) => void;
 }) {
   const mappableEvents = events.filter((event) => event.lat !== null && event.lon !== null);
+  const gibsBase = satelliteLayers?.find((l) => l.kind === "base");
+  const gibsOverlays = (satelliteLayers ?? []).filter((l) => l.kind === "overlay");
 
   return (
     <MapContainer
@@ -57,11 +71,33 @@ export default function EnergyMap({
       attributionControl={false}
     >
       {mapMode === "satellite" ? (
-        <TileLayer
-          key="satellite"
-          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-          className="satellite-imagery"
-        />
+        gibsBase ? (
+          <>
+            {/* NASA GIBS daily true-colour imagery (keyless) */}
+            <TileLayer
+              key={`gibs-${gibsBase.id}`}
+              url={gibsBase.url_template}
+              maxNativeZoom={gibsBase.max_native_zoom}
+              tileSize={256}
+              className="satellite-imagery"
+            />
+            {gibsOverlays.map((layer) => (
+              <TileLayer
+                key={`gibs-ov-${layer.id}`}
+                url={layer.url_template}
+                maxNativeZoom={layer.max_native_zoom}
+                tileSize={256}
+                opacity={layer.id === "viirs_thermal" ? 0.85 : 0.6}
+              />
+            ))}
+          </>
+        ) : (
+          <TileLayer
+            key="satellite"
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            className="satellite-imagery"
+          />
+        )
       ) : (
         <TileLayer
           key="operations"
@@ -122,25 +158,31 @@ export default function EnergyMap({
         </CircleMarker>
       ))}
 
-      {/* Refineries — sized by capacity, colored by utilisation */}
-      {network.refineries.map((r) => (
-        <CircleMarker
-          key={r.id}
-          center={[r.coords.lat, r.coords.lon]}
-          radius={5 + (r.nameplate_kbpd / 1240) * 9}
-          pathOptions={{
-            color: utilColor(r.utilization),
-            fillColor: utilColor(r.utilization),
-            fillOpacity: 0.35,
-            weight: 1.5,
-          }}
-          eventHandlers={{ click: () => onSelect({ kind: "refinery", id: r.id }) }}
-        >
-          <Tooltip>
-            {r.name} · {r.nameplate_kbpd} kbpd · {r.utilization}%
-          </Tooltip>
-        </CircleMarker>
-      ))}
+      {/* Refineries — sized by capacity, colored by utilisation (or cascade impact) */}
+      {network.refineries.map((r) => {
+        const hit = impacted?.[r.id];
+        const color = hit ? CASCADE_COLOR[hit] ?? "#ef4444" : utilColor(r.utilization);
+        return (
+          <CircleMarker
+            key={r.id}
+            center={[r.coords.lat, r.coords.lon]}
+            radius={5 + (r.nameplate_kbpd / 1240) * 9}
+            pathOptions={{
+              color,
+              fillColor: color,
+              fillOpacity: hit ? 0.6 : 0.35,
+              weight: hit ? 3 : 1.5,
+              className: hit === "offline" || hit === "critical" ? "animate-pulse" : undefined,
+            }}
+            eventHandlers={{ click: () => onSelect({ kind: "refinery", id: r.id }) }}
+          >
+            <Tooltip>
+              {r.name} · {r.nameplate_kbpd} kbpd · {r.utilization}%
+              {hit ? ` · CASCADE: ${hit.toUpperCase()}` : ""}
+            </Tooltip>
+          </CircleMarker>
+        );
+      })}
 
       {/* Strategic reserves */}
       {network.reserves.map((s) => (
@@ -154,6 +196,21 @@ export default function EnergyMap({
           <Tooltip>{s.name} · {s.fill_pct}% full</Tooltip>
         </CircleMarker>
       ))}
+
+      {/* Vessel wake tracks */}
+      {vessels.map((v) =>
+        v.track && v.track.length >= 2 ? (
+          <Polyline
+            key={`wake-${v.id}`}
+            positions={v.track as [number, number][]}
+            pathOptions={{
+              color: v.speed_kn === 0 ? "#ef4444" : "#8aa0bf",
+              weight: 1,
+              opacity: 0.4,
+            }}
+          />
+        ) : null,
+      )}
 
       {/* Vessels */}
       {vessels.map((v) => (

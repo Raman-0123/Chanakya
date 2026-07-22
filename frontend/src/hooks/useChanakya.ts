@@ -3,11 +3,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { ApiError, apiGet, apiPost } from "@/lib/api";
 import type {
+  CascadeResult,
   CouncilResult,
   GraphData,
   IntelFeed,
   MissionRecord,
   NetworkData,
+  SatelliteLayersResponse,
   ScenarioSpec,
   SimulationResult,
   ResponseLevers,
@@ -103,6 +105,28 @@ export function useOntologyStats() {
     queryKey: ["ontology-stats"],
     queryFn: () => apiGet<OntologyStats>("/api/ontology/stats"),
     refetchInterval: 60_000,
+  });
+}
+
+/** NASA GIBS satellite imagery tile-layer config (keyless). */
+export function useSatelliteLayers() {
+  return useQuery<SatelliteLayersResponse>({
+    queryKey: ["satellite-layers"],
+    queryFn: () => apiGet<SatelliteLayersResponse>("/api/satellite/layers"),
+    staleTime: 3_600_000, // imagery date changes daily
+  });
+}
+
+/** Quantified ontology cascade: block a node by a fraction, see downstream impact. */
+export function useCascade(nodeId: string | null, blockFraction: number, enabled: boolean) {
+  return useQuery<CascadeResult>({
+    queryKey: ["cascade", nodeId, blockFraction],
+    queryFn: () =>
+      apiGet<CascadeResult>(
+        `/api/ontology/cascade/${encodeURIComponent(nodeId!)}?block_fraction=${blockFraction}`,
+      ),
+    enabled: enabled && Boolean(nodeId),
+    staleTime: 10_000,
   });
 }
 

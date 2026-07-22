@@ -58,6 +58,65 @@ export interface Vessel {
   origin: string | null;
   destination: string | null;
   cargo_kbbl: number | null;
+  track?: [number, number][];
+}
+
+// ---- Satellite imagery (NASA GIBS) ----
+export interface SatelliteLayer {
+  id: string;
+  label: string;
+  kind: "base" | "overlay";
+  max_native_zoom: number;
+  ext: string;
+  url_template: string;
+}
+export interface SatelliteLayersResponse {
+  provider: string;
+  keyless: boolean;
+  date: string;
+  attribution: string;
+  layers: SatelliteLayer[];
+}
+
+// ---- Ontology cascade ----
+export interface CascadeImpact {
+  id: string;
+  type: string;
+  label: string;
+  relation: string;
+  crude_short_kbpd: number;
+  utilization_before: number | null;
+  utilization_after: number | null;
+  status: "nominal" | "elevated" | "strained" | "critical" | "offline";
+  isolated: boolean;
+  note: string;
+}
+export interface CascadeMacro {
+  nesi_before: number;
+  nesi_after: number;
+  nesi_band: string;
+  brent_change_pct: number;
+  residual_shortfall_kbpd: number;
+  diesel_projected_inr: number;
+}
+export interface CascadeResult {
+  origin: { id: string; type: string; label: string };
+  block_fraction: number;
+  affected: CascadeImpact[];
+  hops: { source: string; target: string; relation: string; magnitude_kbpd: number }[];
+  isolated: string[];
+  rollup: {
+    total_crude_short_kbpd: number;
+    pct_national_throughput: number;
+    refineries_affected: number;
+    refineries_offline: number;
+    refineries_critical: number;
+    isolated_count: number;
+    spr_bridge_days: number;
+    est_diesel_output_loss_kbpd: number;
+  };
+  macro_projection: CascadeMacro | null;
+  narrative: string;
 }
 
 export interface IntelSummary {

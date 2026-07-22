@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
-import { X, Map as MapIcon, Share2, Satellite } from "lucide-react";
-import { useNetwork, useIntelFeed, useSourceStatus } from "@/hooks/useChanakya";
+import { X, Map as MapIcon, Share2, Satellite, Zap } from "lucide-react";
+import { useNetwork, useIntelFeed, useSourceStatus, useSatelliteLayers } from "@/hooks/useChanakya";
 import { Panel, PanelHeader, MetricReadout } from "@/components/primitives";
 import { SourceTag } from "@/components/primitives/SourceTag";
 import { GraphView } from "./GraphView";
+import { CascadePanel } from "./CascadePanel";
 import type { MapMode, TwinSelection } from "./EnergyMap";
 import type { NetworkData, SourceStatus } from "@/lib/types";
 import { cn, fmtCompact } from "@/lib/utils";
@@ -27,10 +28,18 @@ export function DigitalTwinRoom() {
   const { data: network } = useNetwork();
   const { data: feed } = useIntelFeed();
   const { data: sourceData } = useSourceStatus();
+  const { data: satellite } = useSatelliteLayers();
   const [sel, setSel] = useState<TwinSelection | null>(null);
+  const [cascadeSel, setCascadeSel] = useState<TwinSelection | null>(null);
+  const [impacted, setImpacted] = useState<Record<string, string>>({});
   const [view, setView] = useState<View>("map");
   const [mapMode, setMapMode] = useState<MapMode>("operations");
   const sources = sourceData?.sources ?? [];
+  const handleImpacted = useCallback((next: Record<string, string>) => setImpacted(next), []);
+  const closeCascade = useCallback(() => {
+    setCascadeSel(null);
+    setImpacted({});
+  }, []);
 
   return (
     <div className="relative h-full">
@@ -68,6 +77,8 @@ export function DigitalTwinRoom() {
               vessels={feed?.vessels ?? []}
               events={feed?.events ?? []}
               mapMode={mapMode}
+              satelliteLayers={satellite?.layers}
+              impacted={impacted}
               onSelect={setSel}
             />
             {mapMode === "satellite" && (
@@ -104,6 +115,11 @@ export function DigitalTwinRoom() {
               <Legend color="#e6edf7" label="Tanker" />
               <Legend color="#ef4444" label="Satellite / risk event" />
             </div>
+            {mapMode === "satellite" && satellite && (
+              <div className="mt-1.5 border-t border-line pt-1.5 text-[9px] text-ink-dim">
+                {satellite.attribution} · {satellite.date}
+              </div>
+            )}
           </Panel>
         </div>
       )}
@@ -121,8 +137,20 @@ export function DigitalTwinRoom() {
           animate={{ opacity: 1, x: 0 }}
           className="absolute right-4 top-20 z-[500] w-80"
         >
-          <Inspector sel={sel} network={network} onClose={() => setSel(null)} />
+          <Inspector
+            sel={sel}
+            network={network}
+            onClose={() => setSel(null)}
+            onCascade={sel.kind !== "reserve" ? () => setCascadeSel(sel) : undefined}
+          />
         </motion.div>
+      )}
+
+      {/* Cascade / Palantir action flow (left overlay) */}
+      {view === "map" && cascadeSel && (
+        <div className="absolute left-4 top-20 z-[600]">
+          <CascadePanel node={cascadeSel} onImpactedChange={handleImpacted} onClose={closeCascade} />
+        </div>
       )}
     </div>
   );
@@ -216,10 +244,12 @@ function Inspector({
   sel,
   network,
   onClose,
+  onCascade,
 }: {
   sel: TwinSelection;
   network: NetworkData;
   onClose: () => void;
+  onCascade?: () => void;
 }) {
   const body = renderInspector(sel, network);
   return (
@@ -234,6 +264,17 @@ function Inspector({
         }
       />
       <div className="space-y-2 p-4 text-sm">{body.rows}</div>
+      {onCascade && (
+        <div className="border-t border-line p-3">
+          <button
+            onClick={onCascade}
+            className="flex w-full items-center justify-center gap-2 rounded bg-critical/15 px-3 py-2 text-xs font-semibold text-critical transition-colors hover:bg-critical/25"
+          >
+            <Zap size={13} />
+            Simulate blockage & cascade
+          </button>
+        </div>
+      )}
     </Panel>
   );
 }

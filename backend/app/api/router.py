@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     council, events, graph, health, intelligence, missions, network,
-    ontology, realtime, simulation, sources, workflows,
+    ontology, realtime, satellite, simulation, sources, workflows,
 )
 
 api_router = APIRouter()
@@ -20,3 +20,4 @@ api_router.include_router(sources.router)
 api_router.include_router(workflows.router)
 api_router.include_router(missions.router)
 api_router.include_router(realtime.router)
+api_router.include_router(satellite.router)

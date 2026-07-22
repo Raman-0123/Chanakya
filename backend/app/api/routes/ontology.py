@@ -13,6 +13,7 @@ from fastapi import APIRouter, Query
 from app.core.logging import get_logger
 from app.db import get_datastores
 from app.domain import build_energy_network
+from app.domain.cascade import propagate_cascade
 
 log = get_logger("api.ontology")
 router = APIRouter(prefix="/ontology", tags=["ontology"])
@@ -452,6 +453,23 @@ async def impact_propagation(event_id: str) -> dict:
 
     return {"nodes": nodes, "edges": edges, "chain": chain,
             "event_id": event_id, "backend": "in_memory", "degraded": True}
+
+
+@router.get("/cascade/{node_id}")
+async def cascade(
+    node_id: str,
+    block_fraction: float = Query(default=1.0, ge=0.0, le=1.0,
+                                  description="How much of the node to block (0–1)"),
+) -> dict:
+    """Quantified cascade: block a node and propagate magnitude downstream.
+
+    Accepts a port / corridor / supplier / refinery id (bare or type-prefixed,
+    e.g. `port:vadinar` or `vadinar`). Returns per-node crude shortfall,
+    utilisation drops, isolated nodes, SPR bridge days and the national macro
+    projection — the "if this part of the port is blocked, what happens to
+    everything else" view.
+    """
+    return propagate_cascade(_net, node_id, block_fraction).model_dump(mode="json")
 
 
 @router.get("/search")
